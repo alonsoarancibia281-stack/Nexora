@@ -1,5 +1,7 @@
 enum PulseDirection { up, down, noTrade }
 
+enum MarketStability { stable, unstable, veryUnstable }
+
 class PulseSignal {
   const PulseSignal({
     required this.direction,
@@ -10,6 +12,8 @@ class PulseSignal {
     required this.orderBookImbalance,
     required this.volumeRatio,
     required this.bodyPressure,
+    required this.instabilityScore,
+    required this.stability,
     required this.reasons,
   });
 
@@ -21,11 +25,19 @@ class PulseSignal {
   final double orderBookImbalance;
   final double volumeRatio;
   final double bodyPressure;
+  final double instabilityScore;
+  final MarketStability stability;
   final List<String> reasons;
 
   String get directionLabel => switch (direction) {
         PulseDirection.up => 'SUBE',
         PulseDirection.down => 'BAJA',
         PulseDirection.noTrade => 'NO TRADE',
+      };
+
+  String get stabilityLabel => switch (stability) {
+        MarketStability.stable => 'ESTABLE',
+        MarketStability.unstable => 'INESTABLE',
+        MarketStability.veryUnstable => 'MUY INESTABLE',
       };
 }
