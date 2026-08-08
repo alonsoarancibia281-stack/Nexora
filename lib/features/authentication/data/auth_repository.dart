@@ -31,7 +31,7 @@ class AuthRepository {
       'marketing': marketing,
       'country': country.trim(),
     });
-    await client.functions.invoke('request-verification-code', body: {'email': normalizedEmail});
+    await resendVerificationCode(normalizedEmail);
   }
 
   Future<void> login(String email, String password) async {
@@ -52,6 +52,16 @@ class AuthRepository {
     if (profile['email_verified'] != true) {
       await client.auth.signOut();
       throw const AuthException('Debes verificar tu correo antes de continuar.');
+    }
+  }
+
+  Future<void> resendVerificationCode(String email) async {
+    final response = await client.functions.invoke(
+      'request-verification-code',
+      body: {'email': email.trim().toLowerCase()},
+    );
+    if (response.status >= 400) {
+      throw const AuthException('No se pudo reenviar el código.');
     }
   }
 
