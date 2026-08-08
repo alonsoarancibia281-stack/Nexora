@@ -24,18 +24,40 @@ class AuthRepository {
         'experience': experience,
       },
     );
+
     if (response.user == null) {
       throw const AuthException('No se pudo crear la cuenta');
     }
 
-    await client.functions.invoke('register-consent', body: {
-      'terms_version': '2026-08-01',
-      'privacy_version': '2026-08-01',
-      'marketing': marketing,
-      'country': country.trim(),
-    });
+    // Nexora uses its own server-side 6-digit verification flow. In hosted
+    // Supabase, native email confirmation must be disabled so signUp returns
+    // the short-lived session required to persist consent securely.
+    if (response.session == null) {
+      throw const AuthException(
+        'El registro requiere desactivar la confirmación nativa de correo en Supabase para usar la verificación de Nexora.',
+      );
+    }
 
-    await resendVerificationCode(normalizedEmail);
+    try {
+      final consentResponse = await client.functions.invoke(
+        'register-consent',
+        body: {
+          'terms_version': '2026-08-01',
+          'privacy_version': '2026-08-01',
+          'marketing': marketing,
+          'country': country.trim(),
+        },
+      );
+      if (consentResponse.status >= 400) {
+        throw const AuthException('No se pudo registrar el consentimiento.');
+      }
+
+      await resendVerificationCode(normalizedEmail);
+    } finally {
+      // Prevent access with the provisional Supabase session. The user must
+      // verify Nexora's OTP and then sign in normally.
+      await client.auth.signOut();
+    }
   }
 
   Future<void> login(String email, String password) async {
