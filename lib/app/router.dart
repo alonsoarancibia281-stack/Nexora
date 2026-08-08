@@ -18,6 +18,7 @@ final appRouter = GoRouter(
       '/register',
       '/forgot-password',
       '/verify',
+      '/update-password',
     };
 
     if (!hasSession && !publicRoutes.contains(location)) {
