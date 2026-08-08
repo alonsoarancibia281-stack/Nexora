@@ -45,7 +45,7 @@ class _JournalScreenState extends State<JournalScreen>{
       const SizedBox(height:12),
       FilledButton.icon(onPressed:_add,icon:const Icon(Icons.note_add_outlined),label:const Text('Guardar entrada')),
       const SizedBox(height:20),
-      if(loading)const Center(child:CircularProgressIndicator()) else if(entries.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(18),child:Text('Aún no hay entradas.'))) else ...entries.map((e)=>Card(child:ListTile(title:Text('${e.symbol} · ${e.outcome}'),subtitle:Text('${e.thesis}\n${e.createdAt.toLocal()}${e.pnlPercent==null?'':' · ${e.pnlPercent!.toStringAsFixed(2)}%'}'),isThreeLine:true,trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await repo.remove(e.id);await _load();}))),
+      if(loading)const Center(child:CircularProgressIndicator()) else if(entries.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(18),child:Text('Aún no hay entradas.'))) else ...entries.map((e)=>Card(child:ListTile(title:Text('${e.symbol} · ${e.outcome}'),subtitle:Text('${e.thesis}\n${e.createdAt.toLocal()}${e.pnlPercent==null?'':' · ${e.pnlPercent!.toStringAsFixed(2)}%'}'),isThreeLine:true,trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await repo.remove(e.id);await _load();}))))),
     ]));
   }
 
