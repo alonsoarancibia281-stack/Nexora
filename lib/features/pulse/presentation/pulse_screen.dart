@@ -45,9 +45,12 @@ class _PulseScreenState extends State<PulseScreen> {
     await _syncBinanceClock();
     await _startCurrentRound();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
       final end = _roundEnd;
       if (end != null && !_binanceNow.isBefore(end)) {
         _startCurrentRound();
+      } else {
+        setState(() {});
       }
     });
     _refreshTimer = Timer.periodic(
@@ -64,6 +67,7 @@ class _PulseScreenState extends State<PulseScreen> {
     try {
       final serverTime = await _service.loadServerTime();
       _binanceOffset = serverTime.difference(DateTime.now().toUtc());
+      if (mounted) setState(() {});
     } catch (_) {
       // Mantiene la última sincronización válida.
     }
@@ -82,6 +86,7 @@ class _PulseScreenState extends State<PulseScreen> {
     _roundEnd = _roundStart!.add(const Duration(minutes: 5));
     _startPrice = null;
     _unifiedPrediction = null;
+    if (mounted) setState(() {});
     await _load();
   }
 
@@ -189,6 +194,26 @@ class _PulseScreenState extends State<PulseScreen> {
     };
   }
 
+  Duration get _remaining {
+    final end = _roundEnd;
+    if (end == null) return Duration.zero;
+    final value = end.difference(_binanceNow);
+    return value.isNegative ? Duration.zero : value;
+  }
+
+  String get _countdown {
+    final remaining = _remaining;
+    final minutes = remaining.inMinutes.toString().padLeft(2, '0');
+    final seconds = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  double get _roundProgress {
+    if (_roundEnd == null) return 0;
+    final elapsed = 300 - _remaining.inSeconds.clamp(0, 300);
+    return (elapsed / 300).clamp(0.0, 1.0).toDouble();
+  }
+
   @override
   Widget build(BuildContext context) {
     final prediction = _unifiedPrediction;
@@ -204,7 +229,33 @@ class _PulseScreenState extends State<PulseScreen> {
               'Motor único para estimar la dirección probable de Bitcoin al cierre de la ronda de cinco minutos.',
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Text(
+                      'TIEMPO RESTANTE',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _countdown,
+                      style: const TextStyle(
+                        fontSize: 46,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(value: _roundProgress),
+                    const SizedBox(height: 8),
+                    const Text('sincronizado con el reloj de Binance'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
             Card(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
