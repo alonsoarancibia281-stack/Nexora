@@ -9,27 +9,27 @@ on conflict (plan_code,feature_key) do update set value=excluded.value;
 create or replace function public.my_entitlements() returns jsonb
 language sql stable security definer set search_path=''
 as $$
-  with current_role as (
-    select role::text as role from public.user_roles where user_id=auth.uid()
-  ), current_plan as (
-    select plan_code::text as plan
+  with role_cte as (
+    select role::text as role_name from public.user_roles where user_id=auth.uid()
+  ), plan_cte as (
+    select plan_code::text as plan_name
     from public.subscriptions
     where user_id=auth.uid() and status='active'
     order by starts_at desc limit 1
-  ), features as (
+  ), feature_cte as (
     select pf.feature_key, pf.value
     from public.plan_features pf
-    join current_plan cp on pf.plan_code::text=cp.plan
+    join plan_cte pc on pf.plan_code::text=pc.plan_name
   )
   select jsonb_build_object(
-    'role', coalesce((select role from current_role),'user'),
-    'plan', coalesce((select plan from current_plan),'free'),
-    'daily_analyses', coalesce((select (value#>>'{}')::int from features where feature_key='daily_analyses'),0),
-    'active_alerts', coalesce((select (value#>>'{}')::int from features where feature_key='active_alerts'),0),
-    'ai', coalesce((select (value#>>'{}')::boolean from features where feature_key='ai'),false),
-    'backtesting', coalesce((select (value#>>'{}')::boolean from features where feature_key='backtesting'),false),
-    'reports', coalesce((select (value#>>'{}')::boolean from features where feature_key='reports'),false),
-    'admin', coalesce((select (value#>>'{}')::boolean from features where feature_key='admin'),false) or coalesce((select role in ('admin','owner') from current_role),false)
+    'role', coalesce((select role_name from role_cte),'user'),
+    'plan', coalesce((select plan_name from plan_cte),'free'),
+    'daily_analyses', coalesce((select (value#>>'{}')::int from feature_cte where feature_key='daily_analyses'),0),
+    'active_alerts', coalesce((select (value#>>'{}')::int from feature_cte where feature_key='active_alerts'),0),
+    'ai', coalesce((select (value#>>'{}')::boolean from feature_cte where feature_key='ai'),false),
+    'backtesting', coalesce((select (value#>>'{}')::boolean from feature_cte where feature_key='backtesting'),false),
+    'reports', coalesce((select (value#>>'{}')::boolean from feature_cte where feature_key='reports'),false),
+    'admin', coalesce((select (value#>>'{}')::boolean from feature_cte where feature_key='admin'),false) or coalesce((select role_name in ('admin','owner') from role_cte),false)
   );
 $$;
 grant execute on function public.my_entitlements() to authenticated;
