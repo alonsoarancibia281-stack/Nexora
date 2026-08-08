@@ -1,0 +1,15 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class VerifyEmailScreen extends StatefulWidget { const VerifyEmailScreen({super.key,required this.email}); final String email; @override State<VerifyEmailScreen> createState()=>_VerifyEmailScreenState(); }
+class _VerifyEmailScreenState extends State<VerifyEmailScreen>{
+ final code=TextEditingController(); int seconds=60; Timer? timer; bool loading=false; String? message;
+ @override void initState(){super.initState();_startTimer();}
+ void _startTimer(){seconds=60;timer?.cancel();timer=Timer.periodic(const Duration(seconds:1),(t){if(seconds<=1){t.cancel();setState(()=>seconds=0);}else{setState(()=>seconds--);}});}
+ Future<void> verify()async{if(!RegExp(r'^\d{6}$').hasMatch(code.text)){setState(()=>message='Ingresa los seis dígitos.');return;}setState(()=>loading=true);try{final r=await Supabase.instance.client.functions.invoke('verify-email-code',body:{'email':widget.email.trim().toLowerCase(),'code':code.text});if(r.status==200){setState(()=>message='Cuenta verificada correctamente.');await Future.delayed(const Duration(milliseconds:600));if(mounted)context.go('/login');}else{setState(()=>message='Código inválido o vencido.');}}catch(_){setState(()=>message='No se pudo verificar el código.');}finally{if(mounted)setState(()=>loading=false);}}
+ Future<void> resend()async{if(seconds>0)return;try{await Supabase.instance.client.functions.invoke('request-verification-code',body:{'email':widget.email.trim().toLowerCase()});_startTimer();setState(()=>message='Enviamos un nuevo código.');}catch(_){setState(()=>message='No se pudo reenviar el código.');}}
+ @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(),body:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:440),child:Padding(padding:const EdgeInsets.all(24),child:Column(mainAxisAlignment:MainAxisAlignment.center,crossAxisAlignment:CrossAxisAlignment.stretch,children:[const Text('Verifica tu correo',style:TextStyle(fontSize:28,fontWeight:FontWeight.bold)),const SizedBox(height:10),Text('Enviamos un código de 6 dígitos a ${widget.email}.'),const SizedBox(height:24),TextField(controller:code,maxLength:6,textAlign:TextAlign.center,keyboardType:TextInputType.number,autofillHints:const [AutofillHints.oneTimeCode],style:const TextStyle(fontSize:32,letterSpacing:12,fontWeight:FontWeight.bold),decoration:const InputDecoration(counterText:'',hintText:'000000')),const SizedBox(height:16),FilledButton(onPressed:loading?null:verify,child:Text(loading?'Verificando…':'Verificar cuenta')),TextButton(onPressed:seconds==0?resend:null,child:Text(seconds==0?'Reenviar código':'Reenviar en ${seconds}s')),TextButton(onPressed:()=>context.go('/register'),child:const Text('Corregir correo')),if(message!=null)Text(message!,textAlign:TextAlign.center)])))));
+ @override void dispose(){timer?.cancel();code.dispose();super.dispose();}
+}
