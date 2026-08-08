@@ -30,6 +30,16 @@ class BinanceMarketService {
     throw Exception('No se pudo conectar con Binance. ${lastError ?? ''}'.trim());
   }
 
+  Future<DateTime> loadServerTime() async {
+    final response = await _getWithRetry(Uri.parse('$_rest/api/v3/time'));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final millis = data['serverTime'];
+    if (millis is! num) {
+      throw const FormatException('Binance no devolvió serverTime válido.');
+    }
+    return DateTime.fromMillisecondsSinceEpoch(millis.toInt(), isUtc: true);
+  }
+
   List<MarketAsset> _parseMarket(String body) {
     final rows = jsonDecode(body) as List<dynamic>;
     return rows
