@@ -21,6 +21,8 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
+      - name: Generate Android wrapper
+        run: flutter create --platforms=android --org ai.nexora --project-name nexora_markets_ai .
       - name: Build release APK
         run: flutter build apk --release
       - name: Upload APK
