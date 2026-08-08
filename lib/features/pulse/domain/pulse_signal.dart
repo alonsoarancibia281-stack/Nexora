@@ -14,6 +14,9 @@ class PulseSignal {
     required this.bodyPressure,
     required this.instabilityScore,
     required this.stability,
+    required this.agreementRatio,
+    required this.roundDistancePct,
+    required this.expectedRemainingMovePct,
     required this.reasons,
   });
 
@@ -27,6 +30,18 @@ class PulseSignal {
   final double bodyPressure;
   final double instabilityScore;
   final MarketStability stability;
+
+  /// Fraction (0..1) of meaningful mathematical components that agree with
+  /// the current directional edge.
+  final double agreementRatio;
+
+  /// Current percentage distance from the 5-minute round opening price.
+  final double roundDistancePct;
+
+  /// ATR-derived estimate of the percentage movement still plausible before
+  /// the round closes.
+  final double expectedRemainingMovePct;
+
   final List<String> reasons;
 
   String get directionLabel => switch (direction) {
