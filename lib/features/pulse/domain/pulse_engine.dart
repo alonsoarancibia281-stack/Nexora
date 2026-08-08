@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../market/domain/candle.dart';
 import 'pulse_signal.dart';
 
@@ -8,34 +10,87 @@ class PulseEngine {
     required List<Candle> candles,
     required double bidVolume,
     required double askVolume,
+    double? roundStartPrice,
+    int secondsRemaining = 300,
   }) {
-    if (candles.length < 20) {
-      throw ArgumentError('Se requieren al menos 20 velas de 1 minuto.');
+    if (candles.length < 30) {
+      throw ArgumentError('Se requieren al menos 30 velas de 1 minuto.');
     }
 
-    final recent = candles.sublist(candles.length - 20);
+    final recent = candles.sublist(candles.length - 30);
     final closes = recent.map((e) => e.close).toList();
     final volumes = recent.map((e) => e.volume).toList();
+    final currentPrice = closes.last;
+    final safeSeconds = secondsRemaining.clamp(0, 300);
 
     double pct(double from, double to) =>
         from == 0 ? 0.0 : ((to - from) / from) * 100;
     double norm(double value, double scale) =>
-        (value / scale).clamp(-1.0, 1.0).toDouble();
+        scale == 0 ? 0.0 : (value / scale).clamp(-1.0, 1.0).toDouble();
 
+    // 1) Momentum multihorizonte. Más peso al movimiento de 3 minutos que al
+    // último tick para reducir falsas señales por ruido de una sola vela.
     final momentum1 = pct(closes[closes.length - 2], closes.last);
     final momentum3 = pct(closes[closes.length - 4], closes.last);
     final momentum5 = pct(closes[closes.length - 6], closes.last);
-    final momentumScore = (norm(momentum1, 0.18) * 0.35 +
-            norm(momentum3, 0.35) * 0.40 +
-            norm(momentum5, 0.55) * 0.25)
+    final momentumScore = (norm(momentum1, 0.16) * 0.25 +
+            norm(momentum3, 0.34) * 0.45 +
+            norm(momentum5, 0.58) * 0.30)
         .clamp(-1.0, 1.0)
         .toDouble();
 
+    // 2) Tendencia: cruce EMA + pendiente real de los últimos cierres.
     final ema5 = _ema(closes, 5);
     final ema13 = _ema(closes, 13);
+    final ema21 = _ema(closes, 21);
     final trendPct = ema13 == 0 ? 0.0 : ((ema5 - ema13) / ema13) * 100;
-    final trendScore = norm(trendPct, 0.22);
+    final trendLongPct = ema21 == 0 ? 0.0 : ((ema13 - ema21) / ema21) * 100;
+    final slopePct = _slopePctPerCandle(closes.sublist(closes.length - 9));
+    final trendScore = (norm(trendPct, 0.20) * 0.45 +
+            norm(trendLongPct, 0.24) * 0.20 +
+            norm(slopePct, 0.055) * 0.35)
+        .clamp(-1.0, 1.0)
+        .toDouble();
 
+    // 3) RSI como confirmación de momentum, no como señal aislada de reversión.
+    final rsi = _rsi(closes, 14);
+    final rsiScore = norm(rsi - 50.0, 19.0);
+    final rsiExtreme = rsi >= 78 || rsi <= 22;
+
+    // 4) VWAP: confirma si el precio se mantiene por encima/debajo del precio
+    // medio ponderado por volumen de las últimas 20 velas.
+    final vwap = _vwap(recent.sublist(recent.length - 20));
+    final vwapDistancePct = pct(vwap, currentPrice);
+    final vwapScore = norm(vwapDistancePct, 0.26);
+
+    // 5) Posición del precio dentro del rango reciente.
+    final rangeCandles = recent.sublist(recent.length - 12);
+    final rangeHigh = rangeCandles.map((e) => e.high).reduce(math.max);
+    final rangeLow = rangeCandles.map((e) => e.low).reduce(math.min);
+    final rangeSpan = rangeHigh - rangeLow;
+    final rangePosition = rangeSpan <= 0
+        ? 0.0
+        : (((currentPrice - rangeLow) / rangeSpan) * 2 - 1)
+            .clamp(-1.0, 1.0)
+            .toDouble();
+
+    // 6) Persistencia de velas. Evita interpretar un único impulso como una
+    // tendencia estable.
+    final persistenceCandles = recent.sublist(recent.length - 7);
+    var persistence = 0.0;
+    for (final candle in persistenceCandles) {
+      if (candle.close > candle.open) {
+        persistence += 1;
+      } else if (candle.close < candle.open) {
+        persistence -= 1;
+      }
+    }
+    persistence = (persistence / persistenceCandles.length)
+        .clamp(-1.0, 1.0)
+        .toDouble();
+
+    // 7) Libro de órdenes. Se mantiene con peso menor porque un snapshot puede
+    // cambiar rápido y puede contener órdenes que se retiren.
     final depthTotal = bidVolume + askVolume;
     final imbalance = depthTotal <= 0
         ? 0.0
@@ -43,17 +98,19 @@ class PulseEngine {
             .clamp(-1.0, 1.0)
             .toDouble();
 
+    // 8) Volumen e impulso de volumen.
     final recentVol =
-        volumes.sublist(volumes.length - 3).reduce((a, b) => a + b) / 3;
-    final baselineVol = volumes.sublist(2, 12).reduce((a, b) => a + b) / 10;
+        volumes.sublist(volumes.length - 4).reduce((a, b) => a + b) / 4;
+    final baselineVol = volumes.sublist(5, 20).reduce((a, b) => a + b) / 15;
     final volumeRatio = baselineVol <= 0 ? 1.0 : recentVol / baselineVol;
-    final volumeImpulse = (((volumeRatio - 1) / 1.5)
+    final volumeImpulse = (((volumeRatio - 1) / 1.35)
                 .clamp(-1.0, 1.0)
                 .toDouble()) *
         (momentumScore == 0 ? 0.0 : momentumScore.sign);
 
+    // 9) Presión del cuerpo de las velas.
     var bodyPressure = 0.0;
-    for (final candle in recent.sublist(recent.length - 5)) {
+    for (final candle in recent.sublist(recent.length - 6)) {
       final range = candle.high - candle.low;
       if (range > 0) {
         bodyPressure += ((candle.close - candle.open) / range)
@@ -61,27 +118,100 @@ class PulseEngine {
             .toDouble();
       }
     }
-    bodyPressure = (bodyPressure / 5).clamp(-1.0, 1.0).toDouble();
+    bodyPressure = (bodyPressure / 6).clamp(-1.0, 1.0).toDouble();
 
-    final raw = (momentumScore * 0.30 +
-            trendScore * 0.20 +
-            imbalance * 0.25 +
-            volumeImpulse * 0.15 +
-            bodyPressure * 0.10)
+    // 10) ATR: mide cuánto ruido puede quedar antes de que cierre la ronda.
+    final atrPct = _atrPct(recent, 14);
+    final minutesRemaining = math.max(safeSeconds / 60.0, 0.15);
+    final expectedRemainingMovePct =
+        math.max(atrPct * math.sqrt(minutesRemaining) * 0.72, 0.035);
+
+    // 11) Ventaja actual de la ronda. Cuanto menos tiempo queda, más relevante
+    // es estar por encima/debajo del precio inicial frente al movimiento que
+    // razonablemente puede quedar.
+    var roundEdgeScore = 0.0;
+    var roundDistancePct = 0.0;
+    if (roundStartPrice != null && roundStartPrice > 0) {
+      roundDistancePct = pct(roundStartPrice, currentPrice);
+      roundEdgeScore = norm(roundDistancePct, expectedRemainingMovePct);
+    }
+    final elapsedRatio = 1.0 - (safeSeconds / 300.0);
+    final roundEdgeWeight = roundStartPrice == null
+        ? 0.0
+        : (0.10 + elapsedRatio * 0.28).clamp(0.10, 0.38).toDouble();
+
+    // Score técnico base. Ningún indicador individual domina la decisión.
+    final technicalRaw = (momentumScore * 0.20 +
+            trendScore * 0.18 +
+            rsiScore * 0.08 +
+            vwapScore * 0.12 +
+            rangePosition * 0.08 +
+            persistence * 0.08 +
+            imbalance * 0.10 +
+            volumeImpulse * 0.08 +
+            bodyPressure * 0.08)
         .clamp(-1.0, 1.0)
         .toDouble();
 
+    final raw = (technicalRaw * (1 - roundEdgeWeight) +
+            roundEdgeScore * roundEdgeWeight)
+        .clamp(-1.0, 1.0)
+        .toDouble();
     final score = raw * 100;
-    var confidence = 50.0 + score.abs() * 0.42;
-    final momentumVsBookConflict = momentumScore.abs() > 0.25 &&
+
+    final components = <double>[
+      momentumScore,
+      trendScore,
+      rsiScore,
+      vwapScore,
+      rangePosition,
+      persistence,
+      imbalance,
+      bodyPressure,
+      if (roundStartPrice != null) roundEdgeScore,
+    ];
+    final meaningful = components.where((v) => v.abs() >= 0.12).toList();
+    final targetSign = raw == 0 ? 0.0 : raw.sign;
+    final agreeing = meaningful.where((v) => v.sign == targetSign).length;
+    final agreementRatio =
+        meaningful.isEmpty ? 0.0 : agreeing / meaningful.length;
+
+    final momentumVsBookConflict = momentumScore.abs() > 0.24 &&
         imbalance.abs() > 0.20 &&
         momentumScore.sign != imbalance.sign;
-    if (momentumVsBookConflict) confidence -= 8;
-    if (volumeRatio < 0.70) confidence -= 6;
-    confidence = confidence.clamp(50.0, 90.0).toDouble();
+    final trendVsMomentumConflict = trendScore.abs() > 0.25 &&
+        momentumScore.abs() > 0.25 &&
+        trendScore.sign != momentumScore.sign;
+    final edgeVsTrendConflict = roundStartPrice != null &&
+        roundEdgeScore.abs() > 0.30 &&
+        trendScore.abs() > 0.25 &&
+        roundEdgeScore.sign != trendScore.sign;
 
-    final lowQuality =
-        score.abs() < 35 || confidence < 62 || volumeRatio < 0.55;
+    var confidence = 50.0 + score.abs() * 0.34 + agreementRatio * 13.0;
+    if (momentumVsBookConflict) confidence -= 6;
+    if (trendVsMomentumConflict) confidence -= 7;
+    if (edgeVsTrendConflict) confidence -= 6;
+    if (volumeRatio < 0.70) confidence -= 5;
+    if (rsiExtreme) confidence -= 3;
+    if (atrPct < 0.045) confidence -= 6;
+    if (atrPct > 0.95) confidence -= 5;
+
+    // Si queda muy poco tiempo, una ventaja que supera el movimiento esperado
+    // aumenta la confianza; si la ronda está prácticamente empatada, la reduce.
+    if (roundStartPrice != null && safeSeconds <= 75) {
+      final edgeStrength = roundDistancePct.abs() / expectedRemainingMovePct;
+      if (edgeStrength >= 1.25) confidence += 5;
+      if (edgeStrength < 0.25) confidence -= 7;
+    }
+
+    confidence = confidence.clamp(50.0, 91.0).toDouble();
+
+    final lowQuality = score.abs() < 28 ||
+        confidence < 64 ||
+        agreementRatio < 0.56 ||
+        volumeRatio < 0.48 ||
+        (trendVsMomentumConflict && score.abs() < 48);
+
     final direction = lowQuality
         ? PulseDirection.noTrade
         : score > 0
@@ -90,27 +220,35 @@ class PulseEngine {
 
     final reasons = <String>[
       momentumScore > 0.2
-          ? 'Momentum reciente comprador.'
+          ? 'Momentum de 1-5 min favorece compradores.'
           : momentumScore < -0.2
-              ? 'Momentum reciente vendedor.'
+              ? 'Momentum de 1-5 min favorece vendedores.'
               : 'Momentum corto sin dirección clara.',
-      trendScore > 0.15
-          ? 'EMA 5 por encima de EMA 13.'
-          : trendScore < -0.15
-              ? 'EMA 5 por debajo de EMA 13.'
-              : 'EMA 5 y EMA 13 muy próximas.',
-      imbalance > 0.15
-          ? 'Mayor profundidad compradora en el libro.'
-          : imbalance < -0.15
-              ? 'Mayor profundidad vendedora en el libro.'
-              : 'Libro de órdenes relativamente equilibrado.',
-      volumeRatio > 1.25
+      trendScore > 0.18
+          ? 'EMA y pendiente confirman tendencia alcista.'
+          : trendScore < -0.18
+              ? 'EMA y pendiente confirman tendencia bajista.'
+              : 'Tendencia corta poco definida.',
+      rsi > 56
+          ? 'RSI confirma presión compradora.'
+          : rsi < 44
+              ? 'RSI confirma presión vendedora.'
+              : 'RSI cerca de zona neutral.',
+      vwapScore > 0.15
+          ? 'Precio por encima del VWAP reciente.'
+          : vwapScore < -0.15
+              ? 'Precio por debajo del VWAP reciente.'
+              : 'Precio muy próximo al VWAP.',
+      volumeRatio > 1.20
           ? 'Volumen reciente por encima de su referencia.'
           : volumeRatio < 0.75
               ? 'Volumen reciente débil.'
-              : 'Volumen reciente cercano a su referencia.',
-      if (momentumVsBookConflict)
-        'Existe conflicto entre momentum y libro de órdenes.',
+              : 'Volumen reciente normal.',
+      if (roundStartPrice != null)
+        'Ventaja de ronda ${roundDistancePct >= 0 ? '+' : ''}${roundDistancePct.toStringAsFixed(3)}% con ${safeSeconds}s restantes.',
+      if (momentumVsBookConflict || trendVsMomentumConflict || edgeVsTrendConflict)
+        'Hay conflicto entre señales; confianza reducida.',
+      'Confluencia ${(agreementRatio * 100).toStringAsFixed(0)}% · ATR ${atrPct.toStringAsFixed(3)}%.',
     ];
 
     return PulseSignal(
@@ -133,5 +271,78 @@ class PulseEngine {
       ema = value * k + ema * (1 - k);
     }
     return ema;
+  }
+
+  double _rsi(List<double> closes, int period) {
+    if (closes.length <= period) return 50.0;
+    var gains = 0.0;
+    var losses = 0.0;
+    final start = closes.length - period;
+    for (var i = start; i < closes.length; i++) {
+      final change = closes[i] - closes[i - 1];
+      if (change > 0) {
+        gains += change;
+      } else {
+        losses -= change;
+      }
+    }
+    if (losses == 0) return gains == 0 ? 50.0 : 100.0;
+    final rs = gains / losses;
+    return 100.0 - (100.0 / (1.0 + rs));
+  }
+
+  double _vwap(List<Candle> candles) {
+    var pv = 0.0;
+    var totalVolume = 0.0;
+    for (final candle in candles) {
+      final typical = (candle.high + candle.low + candle.close) / 3;
+      pv += typical * candle.volume;
+      totalVolume += candle.volume;
+    }
+    if (totalVolume <= 0) return candles.last.close;
+    return pv / totalVolume;
+  }
+
+  double _atrPct(List<Candle> candles, int period) {
+    if (candles.length < 2) return 0.0;
+    final start = math.max(1, candles.length - period);
+    var totalTr = 0.0;
+    var count = 0;
+    for (var i = start; i < candles.length; i++) {
+      final candle = candles[i];
+      final prevClose = candles[i - 1].close;
+      final tr = math.max(
+        candle.high - candle.low,
+        math.max(
+          (candle.high - prevClose).abs(),
+          (candle.low - prevClose).abs(),
+        ),
+      );
+      totalTr += tr;
+      count++;
+    }
+    if (count == 0 || candles.last.close == 0) return 0.0;
+    return (totalTr / count) / candles.last.close * 100;
+  }
+
+  double _slopePctPerCandle(List<double> values) {
+    if (values.length < 2 || values.last == 0) return 0.0;
+    final n = values.length.toDouble();
+    var sumX = 0.0;
+    var sumY = 0.0;
+    var sumXY = 0.0;
+    var sumXX = 0.0;
+    for (var i = 0; i < values.length; i++) {
+      final x = i.toDouble();
+      final y = values[i];
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumXX += x * x;
+    }
+    final denominator = n * sumXX - sumX * sumX;
+    if (denominator == 0) return 0.0;
+    final slope = (n * sumXY - sumX * sumY) / denominator;
+    return slope / values.last * 100;
   }
 }
