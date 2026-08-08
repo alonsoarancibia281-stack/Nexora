@@ -30,6 +30,17 @@ jobs:
         run: flutter test
       - name: Generate Android wrapper
         run: flutter create --platforms=android --org ai.nexora --project-name nexora_markets_ai .
+      - name: Enable Android internet access
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in text:
+              text = text.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">', '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    ' + permission)
+          path.write_text(text)
+          PY
       - name: Build release APK
         run: flutter build apk --release
       - name: Upload APK artifact
