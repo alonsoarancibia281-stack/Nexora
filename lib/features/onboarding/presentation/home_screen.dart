@@ -47,6 +47,8 @@ class HomeScreen extends ConsumerWidget {
                 ]),
               ),
               const SizedBox(height: 18),
+              FilledButton.icon(onPressed: () => context.go('/pulse'), icon: const Icon(Icons.bolt), label: const Text('Nexora Pulse · Predicción 4 min')),
+              const SizedBox(height: 10),
               FilledButton.icon(onPressed: () => context.go('/market'), icon: const Icon(Icons.show_chart), label: const Text('Explorar mercado')),
               const SizedBox(height: 10),
               OutlinedButton.icon(onPressed: () => context.go('/risk'), icon: const Icon(Icons.shield_outlined), label: const Text('Calcular gestión de riesgo')),
