@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../../shared/widgets/main_navigation_scaffold.dart';
 import '../../market/data/binance_market_service.dart';
+import '../domain/multi_timeframe_analysis.dart';
 import '../domain/technical_analysis.dart';
+import '../services/educational_explanation_service.dart';
+import '../services/multi_timeframe_analysis_service.dart';
 import '../services/technical_analysis_engine.dart';
 
 class AnalyzePlaceholderScreen extends StatefulWidget {
@@ -14,10 +17,13 @@ class AnalyzePlaceholderScreen extends StatefulWidget {
 class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
   final _service = BinanceMarketService();
   final _engine = TechnicalAnalysisEngine();
+  final _multiTimeframe = MultiTimeframeAnalysisService();
+  final _explanation = const EducationalExplanationService();
   final _symbol = TextEditingController(text: 'BTCUSDT');
 
   String _interval = '1h';
   Future<TechnicalAnalysis>? _analysis;
+  Future<MultiTimeframeAnalysis>? _multiAnalysis;
 
   @override
   void initState() {
@@ -38,6 +44,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
       _analysis = _service
           .loadCandles(symbol, _interval, limit: 250)
           .then(_engine.analyze);
+      _multiAnalysis = _multiTimeframe.analyze(symbol);
     });
   }
 
@@ -66,6 +73,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
                   labelText: 'Par',
                   hintText: 'BTCUSDT',
                   suffixIcon: IconButton(
+                    tooltip: 'Analizar',
                     onPressed: _run,
                     icon: const Icon(Icons.search),
                   ),
@@ -88,6 +96,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
                     .toList(),
               ),
               const SizedBox(height: 18),
+              if (_multiAnalysis != null) _buildMultiTimeframe(),
               if (_analysis != null)
                 FutureBuilder<TechnicalAnalysis>(
                   future: _analysis,
@@ -112,6 +121,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
                     }
 
                     final analysis = snapshot.data!;
+                    final explanation = _explanation.explain(analysis);
                     return Column(
                       children: [
                         Card(
@@ -166,6 +176,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
                           ['Soporte', analysis.support],
                           ['Resistencia', analysis.resistance],
                         ]),
+                        _educationalCard(explanation),
                         const Card(
                           child: Padding(
                             padding: EdgeInsets.all(16),
@@ -180,6 +191,149 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
                 ),
             ],
           ),
+        ),
+      );
+
+  Widget _buildMultiTimeframe() => FutureBuilder<MultiTimeframeAnalysis>(
+        future: _multiAnalysis,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('Confirmando 15m · 1h · 4h · 1d…')),
+                  ],
+                ),
+              ),
+            );
+          }
+          if (snapshot.hasError) {
+            return const Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'El análisis principal sigue disponible, pero no se pudo completar la confirmación multitemporal.',
+                ),
+              ),
+            );
+          }
+
+          final multi = snapshot.data!;
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        multi.isConfirmed ? Icons.verified : Icons.rule,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Confirmación multitemporal',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${multi.compositeScore >= 0 ? '+' : ''}${multi.compositeScore} · ${multi.bias}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Acuerdo ${multi.agreementPercent.toStringAsFixed(0)}% · Confianza ${multi.confidence.toStringAsFixed(0)}%',
+                  ),
+                  const Divider(height: 24),
+                  ...['15m', '1h', '4h', '1d'].map((interval) {
+                    final item = multi.byInterval[interval]!;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 42,
+                            child: Text(
+                              interval,
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          Expanded(child: Text(item.trend)),
+                          Text(
+                            '${item.score >= 0 ? '+' : ''}${item.score}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                  Text(
+                    multi.isConfirmed
+                        ? 'Varias temporalidades apuntan en la misma dirección. Aun así, la confirmación no elimina el riesgo.'
+                        : 'Las temporalidades no muestran suficiente acuerdo. Conviene interpretar cualquier sesgo con mayor cautela.',
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+  Widget _educationalCard(EducationalExplanation explanation) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.school_outlined),
+                  SizedBox(width: 8),
+                  Text(
+                    'Asistente educativo',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _explanationLine('Lectura general', explanation.summary),
+              _explanationLine('Momentum', explanation.momentum),
+              _explanationLine('Fuerza de tendencia', explanation.trendStrength),
+              _explanationLine('Volatilidad', explanation.volatility),
+              _explanationLine('Niveles', explanation.levels),
+              const Divider(),
+              Text(
+                explanation.riskNote,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _explanationLine(String label, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text(text),
+          ],
         ),
       );
 
