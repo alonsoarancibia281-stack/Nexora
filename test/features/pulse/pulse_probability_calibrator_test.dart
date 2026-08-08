@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nexora/features/pulse/domain/pulse_probability_calibrator.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_probability_calibrator.dart';
 
 void main() {
   const calibrator = PulseProbabilityCalibrator();
