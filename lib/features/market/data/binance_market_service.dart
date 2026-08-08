@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../domain/candle.dart';
 import '../domain/market_asset.dart';
@@ -10,13 +11,27 @@ class BinanceMarketService {
   final http.Client _client;
   static const _rest = 'https://api.binance.com';
   static const _ws = 'wss://stream.binance.com:9443/ws';
+  static const _marketCacheKey = 'nexora_market_cache_v1';
 
-  Future<List<MarketAsset>> loadUsdtMarket() async {
-    final response = await _client.get(Uri.parse('$_rest/api/v3/ticker/24hr'));
-    if (response.statusCode != 200) {
-      throw Exception('No se pudo cargar Binance (${response.statusCode}).');
+  Future<http.Response> _getWithRetry(Uri uri, {int attempts = 3}) async {
+    Object? lastError;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        final response = await _client.get(uri).timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) return response;
+        lastError = Exception('HTTP ${response.statusCode}');
+      } catch (error) {
+        lastError = error;
+      }
+      if (i < attempts - 1) {
+        await Future<void>.delayed(Duration(milliseconds: 500 * (i + 1)));
+      }
     }
-    final rows = jsonDecode(response.body) as List<dynamic>;
+    throw Exception('No se pudo conectar con Binance. ${lastError ?? ''}'.trim());
+  }
+
+  List<MarketAsset> _parseMarket(String body) {
+    final rows = jsonDecode(body) as List<dynamic>;
     return rows
         .cast<Map<String, dynamic>>()
         .where((e) => (e['symbol'] as String).endsWith('USDT'))
@@ -26,14 +41,33 @@ class BinanceMarketService {
       ..sort((a, b) => b.volume24h.compareTo(a.volume24h));
   }
 
+  Future<List<MarketAsset>> loadUsdtMarket() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final response = await _getWithRetry(Uri.parse('$_rest/api/v3/ticker/24hr'));
+      await prefs.setString(_marketCacheKey, response.body);
+      await prefs.setInt('${_marketCacheKey}_at', DateTime.now().millisecondsSinceEpoch);
+      return _parseMarket(response.body);
+    } catch (_) {
+      final cached = prefs.getString(_marketCacheKey);
+      if (cached != null && cached.isNotEmpty) return _parseMarket(cached);
+      rethrow;
+    }
+  }
+
+  Future<DateTime?> cachedMarketTimestamp() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getInt('${_marketCacheKey}_at');
+    return value == null ? null : DateTime.fromMillisecondsSinceEpoch(value);
+  }
+
   Future<List<Candle>> loadCandles(String symbol, String interval, {int limit = 120}) async {
     final uri = Uri.parse('$_rest/api/v3/klines').replace(queryParameters: {
       'symbol': symbol.toUpperCase(),
       'interval': interval,
       'limit': '$limit',
     });
-    final response = await _client.get(uri);
-    if (response.statusCode != 200) throw Exception('No se pudieron cargar las velas.');
+    final response = await _getWithRetry(uri);
     return (jsonDecode(response.body) as List<dynamic>)
         .map((e) => Candle.fromBinance(e as List<dynamic>))
         .toList();
