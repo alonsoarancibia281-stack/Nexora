@@ -14,11 +14,15 @@ class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
   bool loading = false;
+  bool resending = false;
   String? error;
+  String? info;
+
+  bool get needsVerification => error == 'Debes verificar tu correo antes de continuar.';
 
   Future<void> submit() async {
     if (!form.currentState!.validate()) return;
-    setState(() { loading = true; error = null; });
+    setState(() { loading = true; error = null; info = null; });
     try {
       await AuthRepository(Supabase.instance.client).login(email.text, password.text);
       if (mounted) context.go('/home');
@@ -28,6 +32,25 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => error = 'No pudimos iniciar sesión. Intenta nuevamente.');
     } finally {
       if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> resendVerification() async {
+    final emailError = Validators.email(email.text);
+    if (emailError != null) {
+      setState(() => error = emailError);
+      return;
+    }
+    setState(() { resending = true; info = null; });
+    try {
+      await AuthRepository(Supabase.instance.client).resendVerificationCode(email.text);
+      if (!mounted) return;
+      setState(() => info = 'Si la cuenta existe y requiere verificación, enviamos un nuevo código.');
+      context.go('/verify?email=${Uri.encodeComponent(email.text.trim())}');
+    } on AuthException catch (e) {
+      setState(() => error = e.message);
+    } finally {
+      if (mounted) setState(() => resending = false);
     }
   }
 
@@ -46,6 +69,12 @@ class _LoginScreenState extends State<LoginScreen> {
           TextFormField(controller: password, validator: Validators.password, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña')),
           Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => context.go('/forgot-password'), child: const Text('¿Olvidaste tu contraseña?'))),
           if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!)),
+          if (info != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(info!)),
+          if (needsVerification)
+            TextButton(
+              onPressed: resending ? null : resendVerification,
+              child: Text(resending ? 'Reenviando…' : 'Reenviar código de verificación'),
+            ),
           const SizedBox(height: 12),
           FilledButton(onPressed: loading ? null : submit, child: Text(loading ? 'Ingresando…' : 'Iniciar sesión')),
           TextButton(onPressed: () => context.go('/register'), child: const Text('Crear cuenta')),
