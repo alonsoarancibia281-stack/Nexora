@@ -7,6 +7,7 @@ import '../features/authentication/presentation/update_password_screen.dart';
 import '../features/email_verification/presentation/verify_email_screen.dart';
 import '../features/onboarding/presentation/home_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/subscriptions/presentation/plans_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/login',
@@ -50,5 +51,6 @@ final appRouter = GoRouter(
     ),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+    GoRoute(path: '/plans', builder: (_, __) => const PlansScreen()),
   ],
 );
