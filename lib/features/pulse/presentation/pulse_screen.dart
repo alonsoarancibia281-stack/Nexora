@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../market/data/binance_market_service.dart';
 import '../../market/domain/candle.dart';
 import '../data/pulse_ai_service.dart';
+import '../domain/btc_5m_logistic_model.dart';
 import '../domain/pulse_ai_consensus.dart';
 import '../domain/pulse_engine.dart';
 import '../domain/pulse_probability_calibrator.dart';
@@ -24,6 +25,7 @@ class _PulseScreenState extends State<PulseScreen> {
   final _ai = const PulseAiService();
   final _calibrator = const PulseProbabilityCalibrator();
   final _statistical = const PulseStatisticalEngine();
+  final _logistic5m = const Btc5mLogisticModel();
 
   Timer? _clock;
   Timer? _refreshTimer;
@@ -35,6 +37,7 @@ class _PulseScreenState extends State<PulseScreen> {
   PulseAiConsensus? _aiPrediction;
   PulseProbabilityResult? _mathPrediction;
   PulseStatisticalResult? _statPrediction;
+  Btc5mLogisticResult? _logisticPrediction;
   bool _loading = true;
   String? _error;
   double? _startPrice;
@@ -51,8 +54,6 @@ class _PulseScreenState extends State<PulseScreen> {
     await _syncBinanceClock();
     await _startCurrentRound();
 
-    // 250 ms refresh keeps the displayed second aligned to the exchange clock
-    // instead of drifting with a one-second periodic timer.
     _clock = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!mounted) return;
       final end = _roundEnd;
@@ -68,8 +69,6 @@ class _PulseScreenState extends State<PulseScreen> {
       (_) => _load(silent: true),
     );
 
-    // Re-sample Binance frequently. The offset calculation compensates for
-    // half the network round-trip time, giving a much tighter clock estimate.
     _syncTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _syncBinanceClock(),
@@ -86,8 +85,6 @@ class _PulseScreenState extends State<PulseScreen> {
       );
       final measuredOffset = serverTime.difference(midpoint);
 
-      // Smooth tiny network-jitter changes, but correct large clock errors
-      // immediately.
       final deltaMs = (measuredOffset - _binanceOffset).inMilliseconds.abs();
       if (deltaMs > 1500 || _binanceOffset == Duration.zero) {
         _binanceOffset = measuredOffset;
@@ -100,7 +97,7 @@ class _PulseScreenState extends State<PulseScreen> {
       }
       if (mounted) setState(() {});
     } catch (_) {
-      // Preserve the last valid synchronization when the network is transient.
+      // Preserve last valid exchange-clock synchronization.
     }
   }
 
@@ -120,6 +117,7 @@ class _PulseScreenState extends State<PulseScreen> {
     _aiPrediction = null;
     _mathPrediction = null;
     _statPrediction = null;
+    _logisticPrediction = null;
     if (mounted) setState(() {});
     await _load();
   }
@@ -133,10 +131,10 @@ class _PulseScreenState extends State<PulseScreen> {
     }
 
     try {
-      // A longer return history makes volatility/drift estimates less fragile
-      // while PulseEngine continues to use its most recent 30 candles.
       final List<Candle> candles =
           await _service.loadCandles('BTCUSDT', '1m', limit: 90);
+      final List<Candle> fiveMinuteCandles =
+          await _service.loadCandles('BTCUSDT', '5m', limit: 40);
       final depth = await _service.loadDepthVolume('BTCUSDT', limit: 100);
 
       double? startPrice = _startPrice;
@@ -185,6 +183,16 @@ class _PulseScreenState extends State<PulseScreen> {
         );
       }
 
+      // The spreadsheet model predicts the next 5-minute candle from fully
+      // completed 5-minute bars. Excluding the current open bar prevents
+      // look-ahead and keeps the live implementation faithful to the workbook.
+      final completed5m = start == null
+          ? <Candle>[]
+          : fiveMinuteCandles
+              .where((c) => c.openTime.toUtc().isBefore(start))
+              .toList(growable: false);
+      final logisticPrediction = _logistic5m.analyze(completed5m);
+
       PulseAiConsensus? aiPrediction;
       if (startPrice != null) {
         aiPrediction = await _ai.evaluate(
@@ -201,6 +209,7 @@ class _PulseScreenState extends State<PulseScreen> {
         _signal = signal;
         _mathPrediction = mathPrediction;
         _statPrediction = statPrediction;
+        _logisticPrediction = logisticPrediction;
         _aiPrediction = aiPrediction;
         _startPrice = startPrice;
         _loading = false;
@@ -218,34 +227,43 @@ class _PulseScreenState extends State<PulseScreen> {
   double get _fusedProbabilityUp {
     final calibrated = _mathPrediction;
     final statistical = _statPrediction;
-    if (calibrated == null && statistical == null) return .5;
+    final logistic = _logisticPrediction;
+    if (calibrated == null && statistical == null && logistic == null) return .5;
 
     final signal = _signal;
     final instability = signal?.instabilityScore ?? 50;
     final statQuality = statistical?.signalQuality ?? 0;
 
-    // Statistical evidence receives the highest weight. The original
-    // calibrated technical model remains an independent second estimator.
-    var statWeight = statistical == null ? 0.0 : (.52 + statQuality * .18);
-    var mathWeight = calibrated == null ? 0.0 : .32;
+    var statWeight = statistical == null ? 0.0 : (.50 + statQuality * .18);
+    var mathWeight = calibrated == null ? 0.0 : .30;
 
-    // Generative AI is only a small contextual reviewer; it must never dominate
-    // a five-minute numerical forecast.
+    // The exact spreadsheet formula is included as an independent 5-minute
+    // prior. Because its own held-out validation did not beat the base-rate
+    // benchmark, its weight is intentionally capped until it is retrained on
+    // Binance BTCUSDT history and demonstrates out-of-sample edge.
+    var logisticWeight = 0.0;
+    if (logistic != null && logistic.isReady) {
+      final evidence = ((logistic.probabilityUp - .5).abs() * 2)
+          .clamp(0.0, 1.0)
+          .toDouble();
+      logisticWeight = .08 + evidence * .04;
+    }
+
     var aiWeight = 0.0;
     var aiProbability = .5;
     final ai = _aiPrediction;
     if (ai != null && ai.direction != PulseDirection.noTrade) {
-      aiWeight = (.10 * (1 - instability / 120)).clamp(.02, .10).toDouble();
+      aiWeight = (.08 * (1 - instability / 120)).clamp(.02, .08).toDouble();
       aiProbability = ai.direction == PulseDirection.up
           ? ai.confidence / 100
           : 1 - ai.confidence / 100;
     }
 
-    // In very unstable markets reduce every directional edge toward 50%.
-    final total = statWeight + mathWeight + aiWeight;
+    final total = statWeight + mathWeight + logisticWeight + aiWeight;
     if (total <= 0) return .5;
     var p = ((statistical?.probabilityUp ?? .5) * statWeight +
             (calibrated?.probabilityUp ?? .5) * mathWeight +
+            (logistic?.probabilityUp ?? .5) * logisticWeight +
             aiProbability * aiWeight) /
         total;
 
@@ -402,7 +420,7 @@ class _PulseScreenState extends State<PulseScreen> {
               ],
               const SizedBox(height: 18),
               const Text(
-                'Modelo experimental: retornos logarítmicos, volatilidad EWMA, dependencia serial, difusión del precio, microestructura, calibración técnica y revisión secundaria de IA. Debe validarse con rondas cerradas; no garantiza resultados.',
+                'Modelo experimental: motor estadístico de alta frecuencia + regresión logística de 7 variables del modelo BTC 5m + calibración técnica + revisión secundaria de IA. Debe validarse con rondas cerradas; no garantiza resultados.',
                 textAlign: TextAlign.center,
               ),
             ],
