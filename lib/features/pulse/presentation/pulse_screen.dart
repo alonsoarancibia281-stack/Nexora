@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../market/data/binance_market_service.dart';
+import '../../market/domain/candle.dart';
 import '../domain/pulse_engine.dart';
 import '../domain/pulse_signal.dart';
 
@@ -35,30 +36,34 @@ class _PulseScreenState extends State<PulseScreen> {
       }
       setState(() {});
     });
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _load(silent: true));
+    _refreshTimer =
+        Timer.periodic(const Duration(seconds: 15), (_) => _load(silent: true));
   }
 
   Future<void> _load({bool silent = false}) async {
     final symbol = _symbolController.text.trim().toUpperCase();
     if (symbol.isEmpty) return;
-    if (!silent && mounted) setState(() { _loading = true; _error = null; });
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
     try {
-      final results = await Future.wait<dynamic>([
-        _service.loadCandles(symbol, '1m', limit: 40),
-        _service.loadDepthVolume(symbol, limit: 100),
-      ]);
-      final candles = results[0] as List;
-      final depth = results[1] as ({double bidVolume, double askVolume});
-      final typedCandles = candles.cast();
+      final List<Candle> candles =
+          await _service.loadCandles(symbol, '1m', limit: 40);
+      final depth = await _service.loadDepthVolume(symbol, limit: 100);
       final signal = _engine.analyze(
-        candles: typedCandles,
+        candles: candles,
         bidVolume: depth.bidVolume,
         askVolume: depth.askVolume,
       );
+
       if (!mounted) return;
       setState(() {
         _signal = signal;
-        _lastPrice = typedCandles.last.close;
+        _lastPrice = candles.last.close;
         _loading = false;
         _error = null;
       });
@@ -121,7 +126,13 @@ class _PulseScreenState extends State<PulseScreen> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    Text(_countdown, style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold)),
+                    Text(
+                      _countdown,
+                      style: const TextStyle(
+                        fontSize: 42,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const Text('tiempo restante de la ventana'),
                   ],
                 ),
@@ -129,9 +140,19 @@ class _PulseScreenState extends State<PulseScreen> {
             ),
             const SizedBox(height: 12),
             if (_loading && signal == null)
-              const Center(child: Padding(padding: EdgeInsets.all(36), child: CircularProgressIndicator()))
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(36),
+                  child: CircularProgressIndicator(),
+                ),
+              )
             else if (_error != null && signal == null)
-              Card(child: Padding(padding: const EdgeInsets.all(18), child: Text(_error!)))
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(_error!),
+                ),
+              )
             else if (signal != null) ...[
               Card(
                 child: Padding(
@@ -140,14 +161,22 @@ class _PulseScreenState extends State<PulseScreen> {
                     children: [
                       Text(
                         signal.directionLabel,
-                        style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 6),
-                      if (_lastPrice != null) Text('Precio de referencia: ${_lastPrice!.toStringAsFixed(6)}'),
+                      if (_lastPrice != null)
+                        Text(
+                          'Precio de referencia: ${_lastPrice!.toStringAsFixed(6)}',
+                        ),
                       const SizedBox(height: 12),
                       LinearProgressIndicator(value: signal.confidence / 100),
                       const SizedBox(height: 8),
-                      Text('Confianza del modelo: ${signal.confidence.toStringAsFixed(0)}%'),
+                      Text(
+                        'Confianza del modelo: ${signal.confidence.toStringAsFixed(0)}%',
+                      ),
                       Text('Score Pulse: ${signal.score.toStringAsFixed(1)}'),
                     ],
                   ),
@@ -156,16 +185,36 @@ class _PulseScreenState extends State<PulseScreen> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: _Metric(label: 'Momentum', value: signal.momentumScore)),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Momentum',
+                      value: signal.momentumScore,
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: _Metric(label: 'Tendencia', value: signal.trendScore)),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Tendencia',
+                      value: signal.trendScore,
+                    ),
+                  ),
                 ],
               ),
               Row(
                 children: [
-                  Expanded(child: _Metric(label: 'Order book', value: signal.orderBookImbalance)),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Order book',
+                      value: signal.orderBookImbalance,
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: _Metric(label: 'Presión vela', value: signal.bodyPressure)),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Presión vela',
+                      value: signal.bodyPressure,
+                    ),
+                  ),
                 ],
               ),
               Card(
@@ -181,12 +230,17 @@ class _PulseScreenState extends State<PulseScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('¿Por qué?', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text(
+                        '¿Por qué?',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       const SizedBox(height: 8),
-                      ...signal.reasons.map((reason) => Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Text('• $reason'),
-                          )),
+                      ...signal.reasons.map(
+                        (reason) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text('• $reason'),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -197,7 +251,10 @@ class _PulseScreenState extends State<PulseScreen> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
               ],
             ],
           ],
@@ -231,7 +288,10 @@ class _Metric extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}',
-                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
