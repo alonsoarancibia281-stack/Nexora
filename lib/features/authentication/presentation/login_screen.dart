@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/installation_id.dart';
 import '../../../core/validators.dart';
+import '../../profile/data/session_repository.dart';
 import '../data/auth_repository.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -24,7 +27,13 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!form.currentState!.validate()) return;
     setState(() { loading = true; error = null; info = null; });
     try {
-      await AuthRepository(Supabase.instance.client).login(email.text, password.text);
+      final client = Supabase.instance.client;
+      await AuthRepository(client).login(email.text, password.text);
+      final installationId = await InstallationId.getOrCreate();
+      await SessionRepository(client).registerDevice(
+        installationId: installationId,
+        platform: defaultTargetPlatform.name,
+      );
       if (mounted) context.go('/home');
     } on AuthException catch (e) {
       setState(() => error = e.message);
