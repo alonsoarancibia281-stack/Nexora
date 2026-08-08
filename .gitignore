@@ -1,0 +1,11 @@
+.env
+.dart_tool/
+.packages
+.pub/
+build/
+coverage/
+.idea/
+.vscode/
+*.iml
+android/local.properties
+ios/Flutter/Generated.xcconfig
