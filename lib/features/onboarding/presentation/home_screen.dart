@@ -9,20 +9,31 @@ class HomeScreen extends StatelessWidget {
           title: const Text('Nexora Markets AI'),
           actions: [
             IconButton(
+              tooltip: 'Planes',
+              onPressed: () => context.go('/plans'),
+              icon: const Icon(Icons.workspace_premium_outlined),
+            ),
+            IconButton(
               tooltip: 'Perfil y seguridad',
               onPressed: () => context.go('/profile'),
               icon: const Icon(Icons.person_outline),
             ),
           ],
         ),
-        body: const Padding(
-          padding: EdgeInsets.all(24),
+        body: Padding(
+          padding: const EdgeInsets.all(24),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Bienvenido a Nexora', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-            SizedBox(height: 8),
-            Text('Fase 1 activa: identidad, seguridad y permisos.'),
-            SizedBox(height: 24),
-            Card(child: Padding(padding: EdgeInsets.all(20), child: Text('El plan y los permisos se validan en el servidor.'))),
+            const Text('Bienvenido a Nexora', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Fase 1 activa: identidad, seguridad y permisos.'),
+            const SizedBox(height: 24),
+            const Card(child: Padding(padding: EdgeInsets.all(20), child: Text('El plan y los permisos se validan en el servidor.'))),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => context.go('/plans'),
+              icon: const Icon(Icons.workspace_premium_outlined),
+              label: const Text('Ver planes y límites'),
+            ),
           ]),
         ),
       );
