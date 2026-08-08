@@ -18,26 +18,74 @@ class _PulseScreenState extends State<PulseScreen> {
   final _symbolController = TextEditingController(text: 'BTCUSDT');
   Timer? _clock;
   Timer? _refreshTimer;
-  DateTime _windowEnd = DateTime.now().add(const Duration(minutes: 4));
+  Timer? _serverSyncTimer;
+  Duration _binanceOffset = Duration.zero;
+  DateTime _windowStart = DateTime.now().toUtc();
+  DateTime _windowEnd = DateTime.now().toUtc().add(const Duration(minutes: 4));
   PulseSignal? _signal;
   bool _loading = true;
+  bool _clockSynced = false;
   String? _error;
   double? _lastPrice;
+
+  DateTime get _binanceNow => DateTime.now().toUtc().add(_binanceOffset);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _initialize();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      if (DateTime.now().isAfter(_windowEnd)) {
-        _windowEnd = DateTime.now().add(const Duration(minutes: 4));
-        _load();
+      final now = _binanceNow;
+      if (!now.isBefore(_windowEnd)) {
+        _alignWindow(now);
+        _load(silent: true);
       }
       setState(() {});
     });
     _refreshTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => _load(silent: true));
+    _serverSyncTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _syncBinanceClock(silent: true),
+    );
+  }
+
+  Future<void> _initialize() async {
+    await _syncBinanceClock();
+    await _load();
+  }
+
+  Future<void> _syncBinanceClock({bool silent = false}) async {
+    try {
+      final before = DateTime.now().toUtc();
+      final serverTime = await _service.loadServerTime();
+      final after = DateTime.now().toUtc();
+      final midpoint = before.add(after.difference(before) ~/ 2);
+      final offset = serverTime.difference(midpoint);
+      final adjustedNow = DateTime.now().toUtc().add(offset);
+
+      if (!mounted) return;
+      setState(() {
+        _binanceOffset = offset;
+        _clockSynced = true;
+        _alignWindow(adjustedNow);
+      });
+    } catch (error) {
+      if (!mounted || silent) return;
+      setState(() {
+        _clockSynced = false;
+        _error = 'No se pudo sincronizar la hora con Binance. $error';
+      });
+    }
+  }
+
+  void _alignWindow(DateTime binanceNow) {
+    const windowMs = 4 * 60 * 1000;
+    final nowMs = binanceNow.millisecondsSinceEpoch;
+    final startMs = (nowMs ~/ windowMs) * windowMs;
+    _windowStart = DateTime.fromMillisecondsSinceEpoch(startMs, isUtc: true);
+    _windowEnd = DateTime.fromMillisecondsSinceEpoch(startMs + windowMs, isUtc: true);
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -77,11 +125,18 @@ class _PulseScreenState extends State<PulseScreen> {
   }
 
   String get _countdown {
-    final remaining = _windowEnd.difference(DateTime.now());
+    final remaining = _windowEnd.difference(_binanceNow);
     final safe = remaining.isNegative ? Duration.zero : remaining;
     final minutes = safe.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = safe.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  String get _windowLabel {
+    String two(int value) => value.toString().padLeft(2, '0');
+    final start = _windowStart.toLocal();
+    final end = _windowEnd.toLocal();
+    return '${two(start.hour)}:${two(start.minute)} – ${two(end.hour)}:${two(end.minute)}';
   }
 
   @override
@@ -90,12 +145,33 @@ class _PulseScreenState extends State<PulseScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Nexora Pulse · 4 min')),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () async {
+          await _syncBinanceClock(silent: true);
+          await _load();
+        },
         child: ListView(
           padding: const EdgeInsets.all(18),
           children: [
             const Text(
               'Módulo experimental de lectura direccional de muy corto plazo. La confianza es del modelo, no una probabilidad garantizada de acierto.',
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(
+                  _clockSynced ? Icons.cloud_done_outlined : Icons.schedule_outlined,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _clockSynced
+                        ? 'Temporizador sincronizado con la hora del servidor de Binance.'
+                        : 'Usando reloj local mientras se intenta sincronizar con Binance.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             TextField(
@@ -106,19 +182,19 @@ class _PulseScreenState extends State<PulseScreen> {
                 hintText: 'BTCUSDT',
                 border: OutlineInputBorder(),
               ),
-              onSubmitted: (_) {
-                _windowEnd = DateTime.now().add(const Duration(minutes: 4));
-                _load();
+              onSubmitted: (_) async {
+                await _syncBinanceClock(silent: true);
+                await _load();
               },
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: () {
-                _windowEnd = DateTime.now().add(const Duration(minutes: 4));
-                _load();
+              onPressed: () async {
+                await _syncBinanceClock(silent: true);
+                await _load();
               },
-              icon: const Icon(Icons.bolt),
-              label: const Text('Iniciar nueva ventana de 4 min'),
+              icon: const Icon(Icons.sync),
+              label: const Text('Actualizar con Binance'),
             ),
             const SizedBox(height: 18),
             Card(
@@ -133,7 +209,12 @@ class _PulseScreenState extends State<PulseScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const Text('tiempo restante de la ventana'),
+                    const Text('tiempo real restante de la ventana'),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Ventana: $_windowLabel',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -267,6 +348,7 @@ class _PulseScreenState extends State<PulseScreen> {
   void dispose() {
     _clock?.cancel();
     _refreshTimer?.cancel();
+    _serverSyncTimer?.cancel();
     _symbolController.dispose();
     super.dispose();
   }
