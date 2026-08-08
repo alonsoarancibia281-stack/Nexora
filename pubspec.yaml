@@ -1,7 +1,7 @@
 name: nexora_markets_ai
 description: Educational crypto market analysis application.
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 environment:
   sdk: '>=3.4.0 <4.0.0'
 dependencies:
@@ -12,6 +12,8 @@ dependencies:
   supabase_flutter: ^2.8.4
   crypto: ^3.0.6
   shared_preferences: ^2.5.3
+  http: ^1.3.0
+  web_socket_channel: ^3.0.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
