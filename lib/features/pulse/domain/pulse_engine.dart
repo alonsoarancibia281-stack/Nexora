@@ -28,8 +28,6 @@ class PulseEngine {
     double norm(double value, double scale) =>
         scale == 0 ? 0.0 : (value / scale).clamp(-1.0, 1.0).toDouble();
 
-    // 1) Momentum multihorizonte. Más peso al movimiento de 3 minutos que al
-    // último tick para reducir falsas señales por ruido de una sola vela.
     final momentum1 = pct(closes[closes.length - 2], closes.last);
     final momentum3 = pct(closes[closes.length - 4], closes.last);
     final momentum5 = pct(closes[closes.length - 6], closes.last);
@@ -39,7 +37,6 @@ class PulseEngine {
         .clamp(-1.0, 1.0)
         .toDouble();
 
-    // 2) Tendencia: cruce EMA + pendiente real de los últimos cierres.
     final ema5 = _ema(closes, 5);
     final ema13 = _ema(closes, 13);
     final ema21 = _ema(closes, 21);
@@ -52,18 +49,14 @@ class PulseEngine {
         .clamp(-1.0, 1.0)
         .toDouble();
 
-    // 3) RSI como confirmación de momentum, no como señal aislada de reversión.
     final rsi = _rsi(closes, 14);
     final rsiScore = norm(rsi - 50.0, 19.0);
     final rsiExtreme = rsi >= 78 || rsi <= 22;
 
-    // 4) VWAP: confirma si el precio se mantiene por encima/debajo del precio
-    // medio ponderado por volumen de las últimas 20 velas.
     final vwap = _vwap(recent.sublist(recent.length - 20));
     final vwapDistancePct = pct(vwap, currentPrice);
     final vwapScore = norm(vwapDistancePct, 0.26);
 
-    // 5) Posición del precio dentro del rango reciente.
     final rangeCandles = recent.sublist(recent.length - 12);
     final rangeHigh = rangeCandles.map((e) => e.high).reduce(math.max);
     final rangeLow = rangeCandles.map((e) => e.low).reduce(math.min);
@@ -74,8 +67,6 @@ class PulseEngine {
             .clamp(-1.0, 1.0)
             .toDouble();
 
-    // 6) Persistencia de velas. Evita interpretar un único impulso como una
-    // tendencia estable.
     final persistenceCandles = recent.sublist(recent.length - 7);
     var persistence = 0.0;
     for (final candle in persistenceCandles) {
@@ -89,8 +80,6 @@ class PulseEngine {
         .clamp(-1.0, 1.0)
         .toDouble();
 
-    // 7) Libro de órdenes. Se mantiene con peso menor porque un snapshot puede
-    // cambiar rápido y puede contener órdenes que se retiren.
     final depthTotal = bidVolume + askVolume;
     final imbalance = depthTotal <= 0
         ? 0.0
@@ -98,7 +87,6 @@ class PulseEngine {
             .clamp(-1.0, 1.0)
             .toDouble();
 
-    // 8) Volumen e impulso de volumen.
     final recentVol =
         volumes.sublist(volumes.length - 4).reduce((a, b) => a + b) / 4;
     final baselineVol = volumes.sublist(5, 20).reduce((a, b) => a + b) / 15;
@@ -108,27 +96,31 @@ class PulseEngine {
                 .toDouble()) *
         (momentumScore == 0 ? 0.0 : momentumScore.sign);
 
-    // 9) Presión del cuerpo de las velas.
     var bodyPressure = 0.0;
-    for (final candle in recent.sublist(recent.length - 6)) {
+    var wickNoise = 0.0;
+    final pressureCandles = recent.sublist(recent.length - 6);
+    for (final candle in pressureCandles) {
       final range = candle.high - candle.low;
       if (range > 0) {
+        final body = (candle.close - candle.open).abs();
         bodyPressure += ((candle.close - candle.open) / range)
             .clamp(-1.0, 1.0)
             .toDouble();
+        wickNoise += (1 - body / range).clamp(0.0, 1.0).toDouble();
       }
     }
-    bodyPressure = (bodyPressure / 6).clamp(-1.0, 1.0).toDouble();
+    bodyPressure = (bodyPressure / pressureCandles.length)
+        .clamp(-1.0, 1.0)
+        .toDouble();
+    wickNoise = (wickNoise / pressureCandles.length)
+        .clamp(0.0, 1.0)
+        .toDouble();
 
-    // 10) ATR: mide cuánto ruido puede quedar antes de que cierre la ronda.
     final atrPct = _atrPct(recent, 14);
     final minutesRemaining = math.max(safeSeconds / 60.0, 0.15);
     final expectedRemainingMovePct =
         math.max(atrPct * math.sqrt(minutesRemaining) * 0.72, 0.035);
 
-    // 11) Ventaja actual de la ronda. Cuanto menos tiempo queda, más relevante
-    // es estar por encima/debajo del precio inicial frente al movimiento que
-    // razonablemente puede quedar.
     var roundEdgeScore = 0.0;
     var roundDistancePct = 0.0;
     if (roundStartPrice != null && roundStartPrice > 0) {
@@ -140,7 +132,6 @@ class PulseEngine {
         ? 0.0
         : (0.10 + elapsedRatio * 0.28).clamp(0.10, 0.38).toDouble();
 
-    // Score técnico base. Ningún indicador individual domina la decisión.
     final technicalRaw = (momentumScore * 0.20 +
             trendScore * 0.18 +
             rsiScore * 0.08 +
@@ -187,6 +178,49 @@ class PulseEngine {
         trendScore.abs() > 0.25 &&
         roundEdgeScore.sign != trendScore.sign;
 
+    var directionFlips = 0;
+    int candleDirection(Candle candle) => candle.close > candle.open
+        ? 1
+        : candle.close < candle.open
+            ? -1
+            : 0;
+    final flipCandles = recent.sublist(recent.length - 8);
+    var previousDirection = candleDirection(flipCandles.first);
+    for (final candle in flipCandles.skip(1)) {
+      final currentDirection = candleDirection(candle);
+      if (previousDirection != 0 &&
+          currentDirection != 0 &&
+          previousDirection != currentDirection) {
+        directionFlips++;
+      }
+      if (currentDirection != 0) previousDirection = currentDirection;
+    }
+    final flipRatio = directionFlips / (flipCandles.length - 1);
+
+    final conflictCount = [
+      momentumVsBookConflict,
+      trendVsMomentumConflict,
+      edgeVsTrendConflict,
+    ].where((value) => value).length;
+    final conflictRatio = conflictCount / 3.0;
+    final atrInstability = ((atrPct - 0.10) / 0.55)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final volumeShock = ((volumeRatio - 1.25) / 1.75)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final instabilityScore = (atrInstability * 0.34 +
+            flipRatio * 0.25 +
+            wickNoise * 0.20 +
+            conflictRatio * 0.16 +
+            volumeShock * 0.05) *
+        100;
+    final stability = instabilityScore >= 68
+        ? MarketStability.veryUnstable
+        : instabilityScore >= 38
+            ? MarketStability.unstable
+            : MarketStability.stable;
+
     var confidence = 50.0 + score.abs() * 0.34 + agreementRatio * 13.0;
     if (momentumVsBookConflict) confidence -= 6;
     if (trendVsMomentumConflict) confidence -= 7;
@@ -195,9 +229,9 @@ class PulseEngine {
     if (rsiExtreme) confidence -= 3;
     if (atrPct < 0.045) confidence -= 6;
     if (atrPct > 0.95) confidence -= 5;
+    if (stability == MarketStability.unstable) confidence -= 7;
+    if (stability == MarketStability.veryUnstable) confidence -= 14;
 
-    // Si queda muy poco tiempo, una ventaja que supera el movimiento esperado
-    // aumenta la confianza; si la ronda está prácticamente empatada, la reduce.
     if (roundStartPrice != null && safeSeconds <= 75) {
       final edgeStrength = roundDistancePct.abs() / expectedRemainingMovePct;
       if (edgeStrength >= 1.25) confidence += 5;
@@ -210,6 +244,8 @@ class PulseEngine {
         confidence < 64 ||
         agreementRatio < 0.56 ||
         volumeRatio < 0.48 ||
+        stability == MarketStability.veryUnstable ||
+        (stability == MarketStability.unstable && score.abs() < 42) ||
         (trendVsMomentumConflict && score.abs() < 48);
 
     final direction = lowQuality
@@ -248,6 +284,9 @@ class PulseEngine {
         'Ventaja de ronda ${roundDistancePct >= 0 ? '+' : ''}${roundDistancePct.toStringAsFixed(3)}% con ${safeSeconds}s restantes.',
       if (momentumVsBookConflict || trendVsMomentumConflict || edgeVsTrendConflict)
         'Hay conflicto entre señales; confianza reducida.',
+      'Mercado ${stability == MarketStability.stable ? 'estable' : stability == MarketStability.unstable ? 'inestable' : 'muy inestable'} · índice ${instabilityScore.toStringAsFixed(0)}/100.',
+      if (stability == MarketStability.veryUnstable)
+        'Volatilidad/ruido excesivos: Nexora fuerza NO TRADE.',
       'Confluencia ${(agreementRatio * 100).toStringAsFixed(0)}% · ATR ${atrPct.toStringAsFixed(3)}%.',
     ];
 
@@ -260,6 +299,8 @@ class PulseEngine {
       orderBookImbalance: imbalance * 100,
       volumeRatio: volumeRatio,
       bodyPressure: bodyPressure * 100,
+      instabilityScore: instabilityScore,
+      stability: stability,
       reasons: reasons,
     );
   }
