@@ -6,15 +6,17 @@ import '../features/market/presentation/asset_detail_screen.dart';
 import '../features/market/presentation/favorites_screen.dart';
 import '../features/market/presentation/market_screen.dart';
 import '../features/onboarding/presentation/home_screen.dart';
+import '../features/onboarding/presentation/splash_screen.dart';
 import '../features/pulse/presentation/pulse_screen.dart';
 import '../features/risk/presentation/risk_calculator_screen.dart';
 import '../features/simulator/presentation/simulator_screen.dart';
 
-/// MVP v0.1 runs in guest mode: no account, verification or payment gate.
-/// Authentication and subscriptions remain in the codebase for a later release.
+/// Guest-first MVP. The startup route presents the Nexora identity before the
+/// local/market services are shown; no account or payment gate is introduced.
 final appRouter = GoRouter(
-  initialLocation: '/home',
+  initialLocation: '/splash',
   routes: [
+    GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
     GoRoute(path: '/market', builder: (_, __) => const MarketScreen()),
     GoRoute(path: '/analyze', builder: (_, __) => const AnalyzePlaceholderScreen()),
@@ -24,11 +26,6 @@ final appRouter = GoRouter(
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
     GoRoute(path: '/journal', builder: (_, __) => const JournalScreen()),
     GoRoute(path: '/pulse', builder: (_, __) => const PulseScreen()),
-    GoRoute(
-      path: '/market/:symbol',
-      builder: (_, state) => AssetDetailScreen(
-        symbol: state.pathParameters['symbol'] ?? 'BTCUSDT',
-      ),
-    ),
+    GoRoute(path: '/market/:symbol', builder: (_, state) => AssetDetailScreen(symbol: state.pathParameters['symbol'] ?? 'BTCUSDT')),
   ],
 );
