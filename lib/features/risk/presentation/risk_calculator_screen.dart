@@ -14,7 +14,7 @@ class _RiskCalculatorScreenState extends State<RiskCalculatorScreen> {
   final _entry = TextEditingController(text: '100');
   final _stop = TextEditingController(text: '95');
   final _target = TextEditingController(text: '110');
-  const _calculator = RiskCalculator();
+  static const _calculator = RiskCalculator();
 
   RiskPlan? _plan;
   String? _error;
