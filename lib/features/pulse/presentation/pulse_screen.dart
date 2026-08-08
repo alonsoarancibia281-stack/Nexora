@@ -52,8 +52,14 @@ class _PulseScreenState extends State<PulseScreen> {
         setState(() {});
       }
     });
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _load(silent: true));
-    _syncTimer = Timer.periodic(const Duration(minutes: 1), (_) => _syncBinanceClock());
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _load(silent: true),
+    );
+    _syncTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _syncBinanceClock(),
+    );
   }
 
   Future<void> _syncBinanceClock() async {
@@ -85,27 +91,37 @@ class _PulseScreenState extends State<PulseScreen> {
       });
     }
     try {
-      final List<Candle> candles = await _service.loadCandles(symbol, '1m', limit: 40);
+      final List<Candle> candles =
+          await _service.loadCandles(symbol, '1m', limit: 40);
       final depth = await _service.loadDepthVolume(symbol, limit: 100);
-      final signal = _engine.analyze(
-        candles: candles,
-        bidVolume: depth.bidVolume,
-        askVolume: depth.askVolume,
-      );
+
       final start = _roundStart;
       double? startPrice = _startPrice;
       if (start != null) {
         for (final candle in candles.reversed) {
-          if (candle.openTime.toUtc().millisecondsSinceEpoch == start.millisecondsSinceEpoch) {
+          if (candle.openTime.toUtc().millisecondsSinceEpoch ==
+              start.millisecondsSinceEpoch) {
             startPrice = candle.open;
             break;
           }
         }
       }
+
+      final secondsRemaining = _roundEnd == null
+          ? 300
+          : _roundEnd!.difference(_binanceNow).inSeconds.clamp(0, 300);
+
+      final signal = _engine.analyze(
+        candles: candles,
+        bidVolume: depth.bidVolume,
+        askVolume: depth.askVolume,
+        roundStartPrice: startPrice,
+        secondsRemaining: secondsRemaining,
+      );
+
       final currentPrice = candles.last.close;
       PulseAiConsensus? aiSignal;
       if (startPrice != null && _roundEnd != null) {
-        final secondsRemaining = _roundEnd!.difference(_binanceNow).inSeconds.clamp(0, 300);
         aiSignal = await _ai.evaluate(
           symbol: symbol,
           startPrice: startPrice,
@@ -114,6 +130,7 @@ class _PulseScreenState extends State<PulseScreen> {
           quantitative: signal,
         );
       }
+
       if (!mounted) return;
       setState(() {
         _signal = signal;
@@ -136,8 +153,12 @@ class _PulseScreenState extends State<PulseScreen> {
     final q = _signal;
     final ai = _aiSignal;
     if (q == null) return PulseDirection.noTrade;
+    if (q.stability == MarketStability.veryUnstable) {
+      return PulseDirection.noTrade;
+    }
     if (ai == null) return q.direction;
-    if (q.direction == PulseDirection.noTrade || ai.direction == PulseDirection.noTrade) {
+    if (q.direction == PulseDirection.noTrade ||
+        ai.direction == PulseDirection.noTrade) {
       return PulseDirection.noTrade;
     }
     if (q.direction != ai.direction) return PulseDirection.noTrade;
@@ -150,9 +171,13 @@ class _PulseScreenState extends State<PulseScreen> {
     final ai = _aiSignal;
     if (ai == null) return q.confidence;
     if (_consensusDirection == PulseDirection.noTrade) {
-      return ((q.confidence + ai.confidence) / 2).clamp(50.0, 70.0).toDouble();
+      return ((q.confidence + ai.confidence) / 2)
+          .clamp(50.0, 70.0)
+          .toDouble();
     }
-    return (q.confidence * 0.65 + ai.confidence * 0.35 + 3).clamp(50.0, 90.0).toDouble();
+    return (q.confidence * 0.65 + ai.confidence * 0.35 + 3)
+        .clamp(50.0, 90.0)
+        .toDouble();
   }
 
   String get _consensusLabel => switch (_consensusDirection) {
@@ -177,8 +202,13 @@ class _PulseScreenState extends State<PulseScreen> {
     return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 
-  double? get _priceDelta => _startPrice == null || _lastPrice == null ? null : _lastPrice! - _startPrice!;
-  double? get _priceDeltaPct => _startPrice == null || _priceDelta == null ? null : (_priceDelta! / _startPrice!) * 100;
+  double? get _priceDelta => _startPrice == null || _lastPrice == null
+      ? null
+      : _lastPrice! - _startPrice!;
+
+  double? get _priceDeltaPct => _startPrice == null || _priceDelta == null
+      ? null
+      : (_priceDelta! / _startPrice!) * 100;
 
   String get _currentSide {
     final delta = _priceDelta;
@@ -194,6 +224,7 @@ class _PulseScreenState extends State<PulseScreen> {
     final aiSignal = _aiSignal;
     final delta = _priceDelta;
     final deltaPct = _priceDeltaPct;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Nexora Pulse · BTC Up/Down 5m')),
       body: RefreshIndicator(
@@ -201,93 +232,246 @@ class _PulseScreenState extends State<PulseScreen> {
         child: ListView(
           padding: const EdgeInsets.all(18),
           children: [
-            const Text('Analiza rondas de 5 minutos alineadas con el reloj de Binance. Nexora no ejecuta órdenes ni garantiza el resultado de la ronda.'),
+            const Text(
+              'Analiza rondas de 5 minutos alineadas con el reloj de Binance. Nexora no ejecuta órdenes ni garantiza el resultado de la ronda.',
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _symbolController,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: 'Par de Binance', hintText: 'BTCUSDT', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: 'Par de Binance',
+                hintText: 'BTCUSDT',
+                border: OutlineInputBorder(),
+              ),
               onSubmitted: (_) => _startCurrentRound(),
             ),
             const SizedBox(height: 12),
-            FilledButton.icon(onPressed: _startCurrentRound, icon: const Icon(Icons.sync), label: const Text('Sincronizar ronda con Binance')),
+            FilledButton.icon(
+              onPressed: _startCurrentRound,
+              icon: const Icon(Icons.sync),
+              label: const Text('Sincronizar ronda con Binance'),
+            ),
             const SizedBox(height: 18),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(18),
-                child: Column(children: [
-                  Text('Ronda ${_time(_roundStart)} → ${_time(_roundEnd)}'),
-                  const SizedBox(height: 10),
-                  Text(_countdown, style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold)),
-                  const Text('cuenta regresiva sincronizada con Binance'),
-                ]),
+                child: Column(
+                  children: [
+                    Text('Ronda ${_time(_roundStart)} → ${_time(_roundEnd)}'),
+                    const SizedBox(height: 10),
+                    Text(
+                      _countdown,
+                      style: const TextStyle(
+                        fontSize: 42,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text('cuenta regresiva sincronizada con Binance'),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 12),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(18),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(_currentSide, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  Text('Precio inicial: ${_startPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
-                  Text('Precio actual: ${_lastPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
-                  if (delta != null && deltaPct != null)
-                    Text('Distancia: ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} (${deltaPct >= 0 ? '+' : ''}${deltaPct.toStringAsFixed(3)}%)'),
-                ]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentSide,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Precio inicial: ${_startPrice?.toStringAsFixed(2) ?? 'cargando…'}',
+                    ),
+                    Text(
+                      'Precio actual: ${_lastPrice?.toStringAsFixed(2) ?? 'cargando…'}',
+                    ),
+                    if (delta != null && deltaPct != null)
+                      Text(
+                        'Distancia: ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} '
+                        '(${deltaPct >= 0 ? '+' : ''}${deltaPct.toStringAsFixed(3)}%)',
+                      ),
+                  ],
+                ),
               ),
             ),
             if (_loading && signal == null)
-              const Padding(padding: EdgeInsets.all(36), child: Center(child: CircularProgressIndicator()))
+              const Padding(
+                padding: EdgeInsets.all(36),
+                child: Center(child: CircularProgressIndicator()),
+              )
             else if (_error != null && signal == null)
-              Card(child: Padding(padding: const EdgeInsets.all(18), child: Text(_error!)))
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(_error!),
+                ),
+              )
             else if (signal != null) ...[
               const SizedBox(height: 12),
               Card(
+                child: ListTile(
+                  leading: Icon(
+                    signal.stability == MarketStability.stable
+                        ? Icons.check_circle_outline
+                        : signal.stability == MarketStability.unstable
+                            ? Icons.warning_amber_rounded
+                            : Icons.report_gmailerrorred,
+                  ),
+                  title: Text(
+                    'Mercado ${signal.stabilityLabel}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    signal.stability == MarketStability.stable
+                        ? 'Las condiciones actuales tienen un nivel de ruido controlado.'
+                        : signal.stability == MarketStability.unstable
+                            ? 'Hay volatilidad, cambios de dirección o señales en conflicto. Opera con cautela.'
+                            : 'Ruido y volatilidad elevados. Nexora bloquea UP/DOWN y recomienda NO TRADE.',
+                  ),
+                  trailing: Text(
+                    '${signal.instabilityScore.toStringAsFixed(0)}/100',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              Card(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
-                  child: Column(children: [
-                    const Text('CONSENSO NEXORA', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text(_consensusLabel, style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(value: _consensusConfidence / 100),
-                    const SizedBox(height: 8),
-                    Text('Confianza combinada: ${_consensusConfidence.toStringAsFixed(0)}%'),
-                    Text('Motor cuantitativo: ${signal.directionLabel} · ${signal.confidence.toStringAsFixed(0)}%'),
-                    Text(aiSignal == null
-                        ? (_ai.isConfigured ? 'IA: no disponible en esta actualización' : 'IA opcional no configurada; usando solo motor local')
-                        : 'IA ${aiSignal.provider}: ${aiSignal.direction.name.toUpperCase()} · ${aiSignal.confidence.toStringAsFixed(0)}%'),
-                  ]),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'CONSENSO NEXORA',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _consensusLabel,
+                        style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: _consensusConfidence / 100,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Confianza combinada: ${_consensusConfidence.toStringAsFixed(0)}%',
+                      ),
+                      Text(
+                        'Motor cuantitativo: ${signal.directionLabel} · ${signal.confidence.toStringAsFixed(0)}%',
+                      ),
+                      Text(
+                        aiSignal == null
+                            ? (_ai.isConfigured
+                                ? 'IA: no disponible en esta actualización'
+                                : 'IA opcional no configurada; usando solo motor local')
+                            : 'IA ${aiSignal.provider}: ${aiSignal.direction.name.toUpperCase()} · ${aiSignal.confidence.toStringAsFixed(0)}%',
+                      ),
+                    ],
+                  ),
                 ),
               ),
               if (aiSignal != null)
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Segunda opinión de IA', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Text(aiSignal.explanation),
-                    ]),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Segunda opinión de IA',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(aiSignal.explanation),
+                      ],
+                    ),
                   ),
                 ),
-              Row(children: [Expanded(child: _Metric(label: 'Momentum', value: signal.momentumScore)), const SizedBox(width: 8), Expanded(child: _Metric(label: 'Tendencia', value: signal.trendScore))]),
-              Row(children: [Expanded(child: _Metric(label: 'Order book', value: signal.orderBookImbalance)), const SizedBox(width: 8), Expanded(child: _Metric(label: 'Presión vela', value: signal.bodyPressure))]),
-              Card(child: ListTile(title: const Text('Volumen reciente / referencia'), trailing: Text('${signal.volumeRatio.toStringAsFixed(2)}x'))),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Metric(
+                      label: 'Momentum',
+                      value: signal.momentumScore,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Tendencia',
+                      value: signal.trendScore,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Metric(
+                      label: 'Order book',
+                      value: signal.orderBookImbalance,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Presión vela',
+                      value: signal.bodyPressure,
+                    ),
+                  ),
+                ],
+              ),
+              Card(
+                child: ListTile(
+                  title: const Text('Volumen reciente / referencia'),
+                  trailing: Text('${signal.volumeRatio.toStringAsFixed(2)}x'),
+                ),
+              ),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('¿Por qué?', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    ...signal.reasons.map((reason) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $reason'))),
-                  ]),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '¿Por qué?',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      ...signal.reasons.map(
+                        (reason) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text('• $reason'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
-              const Text('Si la IA y el motor cuantitativo discrepan, Nexora fuerza NO TRADE. La IA solo interpreta datos estructurados ya calculados; no inventa precios ni noticias.'),
-              if (_error != null) ...[const SizedBox(height: 12), Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
+              const Text(
+                'Si la IA y el motor cuantitativo discrepan, Nexora fuerza NO TRADE. '
+                'Si el mercado es muy inestable, Nexora también bloquea UP/DOWN. '
+                'La IA interpreta datos estructurados; no inventa precios ni noticias.',
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
             ],
           ],
         ),
@@ -307,17 +491,28 @@ class _PulseScreenState extends State<PulseScreen> {
 
 class _Metric extends StatelessWidget {
   const _Metric({required this.label, required this.value});
+
   final String label;
   final double value;
+
   @override
   Widget build(BuildContext context) => Card(
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 4),
-            Text('${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
-          ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              Text(
+                '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}',
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
       );
 }
