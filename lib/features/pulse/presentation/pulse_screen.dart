@@ -150,41 +150,48 @@ class _PulseScreenState extends State<PulseScreen> {
   }
 
   PulseDirection get _consensusDirection {
-    final q = _signal;
     final ai = _aiSignal;
+    if (ai != null && ai.direction != PulseDirection.noTrade) {
+      return ai.direction;
+    }
+    final q = _signal;
     if (q == null) return PulseDirection.noTrade;
-    if (q.stability == MarketStability.veryUnstable) {
-      return PulseDirection.noTrade;
-    }
-    if (ai == null) return q.direction;
-    if (q.direction == PulseDirection.noTrade ||
-        ai.direction == PulseDirection.noTrade) {
-      return PulseDirection.noTrade;
-    }
-    if (q.direction != ai.direction) return PulseDirection.noTrade;
-    return q.direction;
+    if (q.score > 0) return PulseDirection.up;
+    if (q.score < 0) return PulseDirection.down;
+    final delta = _priceDelta;
+    if (delta != null && delta < 0) return PulseDirection.down;
+    return PulseDirection.up;
   }
 
   double get _consensusConfidence {
+    final ai = _aiSignal;
+    if (ai != null) return ai.confidence.clamp(50.0, 90.0).toDouble();
     final q = _signal;
     if (q == null) return 50;
-    final ai = _aiSignal;
-    if (ai == null) return q.confidence;
-    if (_consensusDirection == PulseDirection.noTrade) {
-      return ((q.confidence + ai.confidence) / 2)
-          .clamp(50.0, 70.0)
-          .toDouble();
-    }
-    return (q.confidence * 0.65 + ai.confidence * 0.35 + 3)
-        .clamp(50.0, 90.0)
-        .toDouble();
+    var confidence = q.confidence;
+    if (q.direction == PulseDirection.noTrade) confidence -= 8;
+    if (q.stability == MarketStability.unstable) confidence -= 7;
+    if (q.stability == MarketStability.veryUnstable) confidence -= 14;
+    return confidence.clamp(50.0, 82.0).toDouble();
   }
 
   String get _consensusLabel => switch (_consensusDirection) {
-        PulseDirection.up => 'SUBE',
-        PulseDirection.down => 'BAJA',
-        PulseDirection.noTrade => 'NO TRADE',
+        PulseDirection.up => 'SESGO ALCISTA ↑',
+        PulseDirection.down => 'SESGO BAJISTA ↓',
+        PulseDirection.noTrade => 'CALCULANDO…',
       };
+
+  String get _qualityLabel {
+    final confidence = _consensusConfidence;
+    final signal = _signal;
+    if (signal?.stability == MarketStability.veryUnstable || confidence < 60) {
+      return 'CONFIANZA BAJA';
+    }
+    if (confidence < 74 || signal?.stability == MarketStability.unstable) {
+      return 'CONFIANZA MEDIA';
+    }
+    return 'CONFIANZA ALTA';
+  }
 
   String get _countdown {
     final end = _roundEnd;
@@ -233,7 +240,7 @@ class _PulseScreenState extends State<PulseScreen> {
           padding: const EdgeInsets.all(18),
           children: [
             const Text(
-              'Analiza rondas de 5 minutos alineadas con el reloj de Binance. Nexora no ejecuta órdenes ni garantiza el resultado de la ronda.',
+              'Predicción continua de la dirección probable al cierre de la ronda de 5 minutos. Se actualiza cada 5 segundos con datos de Binance y un consenso único de Nexora.',
             ),
             const SizedBox(height: 16),
             TextField(
@@ -262,12 +269,39 @@ class _PulseScreenState extends State<PulseScreen> {
                     const SizedBox(height: 10),
                     Text(
                       _countdown,
-                      style: const TextStyle(
-                        fontSize: 42,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold),
                     ),
-                    const Text('cuenta regresiva sincronizada con Binance'),
+                    const Text('tiempo restante de la ronda'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Text('PREDICCIÓN 5 MINUTOS', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text(
+                      _consensusLabel,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_qualityLabel, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(value: _consensusConfidence / 100),
+                    const SizedBox(height: 8),
+                    Text('Confianza del consenso: ${_consensusConfidence.toStringAsFixed(0)}%'),
+                    const SizedBox(height: 6),
+                    Text(
+                      aiSignal == null
+                          ? 'Consenso local mientras responde la IA.'
+                          : aiSignal.provider,
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               ),
@@ -279,20 +313,10 @@ class _PulseScreenState extends State<PulseScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _currentSide,
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text(_currentSide, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 10),
-                    Text(
-                      'Precio inicial: ${_startPrice?.toStringAsFixed(2) ?? 'cargando…'}',
-                    ),
-                    Text(
-                      'Precio actual: ${_lastPrice?.toStringAsFixed(2) ?? 'cargando…'}',
-                    ),
+                    Text('Precio inicial: ${_startPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
+                    Text('Precio actual: ${_lastPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
                     if (delta != null && deltaPct != null)
                       Text(
                         'Distancia: ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} '
@@ -308,12 +332,7 @@ class _PulseScreenState extends State<PulseScreen> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_error != null && signal == null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Text(_error!),
-                ),
-              )
+              Card(child: Padding(padding: const EdgeInsets.all(18), child: Text(_error!)))
             else if (signal != null) ...[
               const SizedBox(height: 12),
               Card(
@@ -325,60 +344,15 @@ class _PulseScreenState extends State<PulseScreen> {
                             ? Icons.warning_amber_rounded
                             : Icons.report_gmailerrorred,
                   ),
-                  title: Text(
-                    'Mercado ${signal.stabilityLabel}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  title: Text('Mercado ${signal.stabilityLabel}', style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text(
                     signal.stability == MarketStability.stable
-                        ? 'Las condiciones actuales tienen un nivel de ruido controlado.'
+                        ? 'Nivel de ruido controlado.'
                         : signal.stability == MarketStability.unstable
-                            ? 'Hay volatilidad, cambios de dirección o señales en conflicto. Opera con cautela.'
-                            : 'Ruido y volatilidad elevados. Nexora bloquea UP/DOWN y recomienda NO TRADE.',
+                            ? 'La dirección se mantiene visible, pero la confianza se reduce.'
+                            : 'Volatilidad y ruido elevados. La dirección mostrada es un sesgo de baja confianza.',
                   ),
-                  trailing: Text(
-                    '${signal.instabilityScore.toStringAsFixed(0)}/100',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'CONSENSO NEXORA',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _consensusLabel,
-                        style: const TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
-                        value: _consensusConfidence / 100,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Confianza combinada: ${_consensusConfidence.toStringAsFixed(0)}%',
-                      ),
-                      Text(
-                        'Motor cuantitativo: ${signal.directionLabel} · ${signal.confidence.toStringAsFixed(0)}%',
-                      ),
-                      Text(
-                        aiSignal == null
-                            ? (_ai.isConfigured
-                                ? 'IA: no disponible en esta actualización'
-                                : 'IA opcional no configurada; usando solo motor local')
-                            : 'IA ${aiSignal.provider}: ${aiSignal.direction.name.toUpperCase()} · ${aiSignal.confidence.toStringAsFixed(0)}%',
-                      ),
-                    ],
-                  ),
+                  trailing: Text('${signal.instabilityScore.toStringAsFixed(0)}/100', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
               if (aiSignal != null)
@@ -388,10 +362,7 @@ class _PulseScreenState extends State<PulseScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Segunda opinión de IA',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        const Text('Lectura del consenso', style: TextStyle(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 6),
                         Text(aiSignal.explanation),
                       ],
@@ -400,36 +371,16 @@ class _PulseScreenState extends State<PulseScreen> {
                 ),
               Row(
                 children: [
-                  Expanded(
-                    child: _Metric(
-                      label: 'Momentum',
-                      value: signal.momentumScore,
-                    ),
-                  ),
+                  Expanded(child: _Metric(label: 'Momentum', value: signal.momentumScore)),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: _Metric(
-                      label: 'Tendencia',
-                      value: signal.trendScore,
-                    ),
-                  ),
+                  Expanded(child: _Metric(label: 'Tendencia', value: signal.trendScore)),
                 ],
               ),
               Row(
                 children: [
-                  Expanded(
-                    child: _Metric(
-                      label: 'Order book',
-                      value: signal.orderBookImbalance,
-                    ),
-                  ),
+                  Expanded(child: _Metric(label: 'Order book', value: signal.orderBookImbalance)),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: _Metric(
-                      label: 'Presión vela',
-                      value: signal.bodyPressure,
-                    ),
-                  ),
+                  Expanded(child: _Metric(label: 'Presión vela', value: signal.bodyPressure)),
                 ],
               ),
               Card(
@@ -444,10 +395,7 @@ class _PulseScreenState extends State<PulseScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '¿Por qué?',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      const Text('Contexto técnico', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       ...signal.reasons.map(
                         (reason) => Padding(
@@ -461,16 +409,11 @@ class _PulseScreenState extends State<PulseScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Si la IA y el motor cuantitativo discrepan, Nexora fuerza NO TRADE. '
-                'Si el mercado es muy inestable, Nexora también bloquea UP/DOWN. '
-                'La IA interpreta datos estructurados; no inventa precios ni noticias.',
+                'El sesgo UP/DOWN es probabilístico y puede cambiar durante la ronda conforme llegan nuevos datos. Una confianza baja o un mercado inestable significa que la dirección es menos fiable; no representa una garantía de resultado.',
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
+                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ],
             ],
           ],
@@ -506,10 +449,7 @@ class _Metric extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
               ),
             ],
           ),
