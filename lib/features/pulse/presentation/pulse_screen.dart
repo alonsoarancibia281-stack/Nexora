@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../../market/data/binance_market_service.dart';
 import '../../market/domain/candle.dart';
 import '../data/pulse_ai_service.dart';
@@ -18,7 +20,7 @@ class _PulseScreenState extends State<PulseScreen> {
   final _service = BinanceMarketService();
   final _engine = const PulseEngine();
   final _ai = const PulseAiService();
-  final _symbolController = TextEditingController(text: 'BTCUSDT');
+
   Timer? _clock;
   Timer? _refreshTimer;
   Timer? _syncTimer;
@@ -26,11 +28,10 @@ class _PulseScreenState extends State<PulseScreen> {
   DateTime? _roundStart;
   DateTime? _roundEnd;
   PulseSignal? _signal;
-  PulseAiConsensus? _aiSignal;
+  PulseAiConsensus? _unifiedPrediction;
   bool _loading = true;
   String? _error;
   double? _startPrice;
-  double? _lastPrice;
 
   DateTime get _binanceNow => DateTime.now().toUtc().add(_binanceOffset);
 
@@ -44,12 +45,9 @@ class _PulseScreenState extends State<PulseScreen> {
     await _syncBinanceClock();
     await _startCurrentRound();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
       final end = _roundEnd;
       if (end != null && !_binanceNow.isBefore(end)) {
         _startCurrentRound();
-      } else {
-        setState(() {});
       }
     });
     _refreshTimer = Timer.periodic(
@@ -66,37 +64,42 @@ class _PulseScreenState extends State<PulseScreen> {
     try {
       final serverTime = await _service.loadServerTime();
       _binanceOffset = serverTime.difference(DateTime.now().toUtc());
-      if (mounted) setState(() {});
-    } catch (_) {}
+    } catch (_) {
+      // Mantiene la última sincronización válida.
+    }
   }
 
   Future<void> _startCurrentRound() async {
     final now = _binanceNow;
     final minuteBucket = (now.minute ~/ 5) * 5;
-    final start = DateTime.utc(now.year, now.month, now.day, now.hour, minuteBucket);
-    _roundStart = start;
-    _roundEnd = start.add(const Duration(minutes: 5));
+    _roundStart = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      minuteBucket,
+    );
+    _roundEnd = _roundStart!.add(const Duration(minutes: 5));
     _startPrice = null;
-    _aiSignal = null;
+    _unifiedPrediction = null;
     await _load();
   }
 
   Future<void> _load({bool silent = false}) async {
-    final symbol = _symbolController.text.trim().toUpperCase();
-    if (symbol.isEmpty) return;
     if (!silent && mounted) {
       setState(() {
         _loading = true;
         _error = null;
       });
     }
+
     try {
       final List<Candle> candles =
-          await _service.loadCandles(symbol, '1m', limit: 40);
-      final depth = await _service.loadDepthVolume(symbol, limit: 100);
+          await _service.loadCandles('BTCUSDT', '1m', limit: 40);
+      final depth = await _service.loadDepthVolume('BTCUSDT', limit: 100);
 
-      final start = _roundStart;
       double? startPrice = _startPrice;
+      final start = _roundStart;
       if (start != null) {
         for (final candle in candles.reversed) {
           if (candle.openTime.toUtc().millisecondsSinceEpoch ==
@@ -119,13 +122,12 @@ class _PulseScreenState extends State<PulseScreen> {
         secondsRemaining: secondsRemaining,
       );
 
-      final currentPrice = candles.last.close;
-      PulseAiConsensus? aiSignal;
-      if (startPrice != null && _roundEnd != null) {
-        aiSignal = await _ai.evaluate(
-          symbol: symbol,
+      PulseAiConsensus? prediction;
+      if (startPrice != null) {
+        prediction = await _ai.evaluate(
+          symbol: 'BTCUSDT',
           startPrice: startPrice,
-          currentPrice: currentPrice,
+          currentPrice: candles.last.close,
           secondsRemaining: secondsRemaining,
           quantitative: signal,
         );
@@ -134,9 +136,8 @@ class _PulseScreenState extends State<PulseScreen> {
       if (!mounted) return;
       setState(() {
         _signal = signal;
-        _aiSignal = aiSignal;
+        _unifiedPrediction = prediction;
         _startPrice = startPrice;
-        _lastPrice = currentPrice;
         _loading = false;
         _error = null;
       });
@@ -144,278 +145,148 @@ class _PulseScreenState extends State<PulseScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'No se pudo actualizar Pulse con Binance. $error';
+        _error = 'No se pudo actualizar Predicciones minutos BTC.';
       });
     }
   }
 
-  PulseDirection get _consensusDirection {
-    final ai = _aiSignal;
-    if (ai != null && ai.direction != PulseDirection.noTrade) {
-      return ai.direction;
+  PulseDirection get _direction {
+    final prediction = _unifiedPrediction;
+    if (prediction != null && prediction.direction != PulseDirection.noTrade) {
+      return prediction.direction;
     }
-    final q = _signal;
-    if (q == null) return PulseDirection.noTrade;
-    if (q.score > 0) return PulseDirection.up;
-    if (q.score < 0) return PulseDirection.down;
-    final delta = _priceDelta;
-    if (delta != null && delta < 0) return PulseDirection.down;
-    return PulseDirection.up;
+    final signal = _signal;
+    if (signal == null) return PulseDirection.noTrade;
+    return signal.score >= 0 ? PulseDirection.up : PulseDirection.down;
   }
 
-  double get _consensusConfidence {
-    final ai = _aiSignal;
-    if (ai != null) return ai.confidence.clamp(50.0, 90.0).toDouble();
-    final q = _signal;
-    if (q == null) return 50;
-    var confidence = q.confidence;
-    if (q.direction == PulseDirection.noTrade) confidence -= 8;
-    if (q.stability == MarketStability.unstable) confidence -= 7;
-    if (q.stability == MarketStability.veryUnstable) confidence -= 14;
-    return confidence.clamp(50.0, 82.0).toDouble();
+  double get _confidence {
+    final prediction = _unifiedPrediction;
+    if (prediction != null) {
+      return prediction.confidence.clamp(50.0, 88.0).toDouble();
+    }
+    final signal = _signal;
+    if (signal == null) return 50;
+    var value = signal.confidence;
+    if (signal.stability == MarketStability.unstable) value -= 7;
+    if (signal.stability == MarketStability.veryUnstable) value -= 14;
+    return value.clamp(50.0, 82.0).toDouble();
   }
 
-  String get _consensusLabel => switch (_consensusDirection) {
-        PulseDirection.up => 'SESGO ALCISTA ↑',
-        PulseDirection.down => 'SESGO BAJISTA ↓',
-        PulseDirection.noTrade => 'CALCULANDO…',
+  String get _directionLabel => switch (_direction) {
+        PulseDirection.up => 'ALTA ↑',
+        PulseDirection.down => 'BAJA ↓',
+        PulseDirection.noTrade => 'CALCULANDO',
       };
 
-  String get _qualityLabel {
-    final confidence = _consensusConfidence;
+  String get _marketLabel {
     final signal = _signal;
-    if (signal?.stability == MarketStability.veryUnstable || confidence < 60) {
-      return 'CONFIANZA BAJA';
-    }
-    if (confidence < 74 || signal?.stability == MarketStability.unstable) {
-      return 'CONFIANZA MEDIA';
-    }
-    return 'CONFIANZA ALTA';
-  }
-
-  String get _countdown {
-    final end = _roundEnd;
-    if (end == null) return '--:--';
-    final remaining = end.difference(_binanceNow);
-    final safe = remaining.isNegative ? Duration.zero : remaining;
-    final minutes = safe.inMinutes.toString().padLeft(2, '0');
-    final seconds = safe.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
-
-  String _time(DateTime? value) {
-    if (value == null) return '--:--';
-    final local = value.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-
-  double? get _priceDelta => _startPrice == null || _lastPrice == null
-      ? null
-      : _lastPrice! - _startPrice!;
-
-  double? get _priceDeltaPct => _startPrice == null || _priceDelta == null
-      ? null
-      : (_priceDelta! / _startPrice!) * 100;
-
-  String get _currentSide {
-    final delta = _priceDelta;
-    if (delta == null) return 'SIN REFERENCIA';
-    if (delta > 0) return 'UP ↑';
-    if (delta < 0) return 'DOWN ↓';
-    return 'EN PRECIO INICIAL';
+    if (signal == null) return 'Analizando mercado';
+    return switch (signal.stability) {
+      MarketStability.stable => 'Mercado estable',
+      MarketStability.unstable => 'Mercado inestable',
+      MarketStability.veryUnstable => 'Mercado muy inestable',
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final signal = _signal;
-    final aiSignal = _aiSignal;
-    final delta = _priceDelta;
-    final deltaPct = _priceDeltaPct;
+    final prediction = _unifiedPrediction;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Nexora Pulse · BTC Up/Down 5m')),
+      appBar: AppBar(title: const Text('Predicciones minutos BTC')),
       body: RefreshIndicator(
         onRefresh: _startCurrentRound,
         child: ListView(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(20),
           children: [
             const Text(
-              'Predicción continua de la dirección probable al cierre de la ronda de 5 minutos. Se actualiza cada 5 segundos con datos de Binance y un consenso único de Nexora.',
+              'Motor único para estimar la dirección probable de Bitcoin al cierre de la ronda de cinco minutos.',
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _symbolController,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                labelText: 'Par de Binance',
-                hintText: 'BTCUSDT',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (_) => _startCurrentRound(),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _startCurrentRound,
-              icon: const Icon(Icons.sync),
-              label: const Text('Sincronizar ronda con Binance'),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  children: [
-                    Text('Ronda ${_time(_roundStart)} → ${_time(_roundEnd)}'),
-                    const SizedBox(height: 10),
-                    Text(
-                      _countdown,
-                      style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold),
-                    ),
-                    const Text('tiempo restante de la ronda'),
-                  ],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 32,
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    const Text('PREDICCIÓN 5 MINUTOS', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text(
-                      _consensusLabel,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
+                    const Text(
+                      'PREDICCIÓN BTC',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    const SizedBox(height: 8),
-                    Text(_qualityLabel, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(value: _consensusConfidence / 100),
-                    const SizedBox(height: 8),
-                    Text('Confianza del consenso: ${_consensusConfidence.toStringAsFixed(0)}%'),
-                    const SizedBox(height: 6),
-                    Text(
-                      aiSignal == null
-                          ? 'Consenso local mientras responde la IA.'
-                          : aiSignal.provider,
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_currentSide, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    Text('Precio inicial: ${_startPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
-                    Text('Precio actual: ${_lastPrice?.toStringAsFixed(2) ?? 'cargando…'}'),
-                    if (delta != null && deltaPct != null)
+                    const SizedBox(height: 14),
+                    if (_loading && _signal == null)
+                      const CircularProgressIndicator()
+                    else ...[
                       Text(
-                        'Distancia: ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)} '
-                        '(${deltaPct >= 0 ? '+' : ''}${deltaPct.toStringAsFixed(3)}%)',
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (_loading && signal == null)
-              const Padding(
-                padding: EdgeInsets.all(36),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_error != null && signal == null)
-              Card(child: Padding(padding: const EdgeInsets.all(18), child: Text(_error!)))
-            else if (signal != null) ...[
-              const SizedBox(height: 12),
-              Card(
-                child: ListTile(
-                  leading: Icon(
-                    signal.stability == MarketStability.stable
-                        ? Icons.check_circle_outline
-                        : signal.stability == MarketStability.unstable
-                            ? Icons.warning_amber_rounded
-                            : Icons.report_gmailerrorred,
-                  ),
-                  title: Text('Mercado ${signal.stabilityLabel}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(
-                    signal.stability == MarketStability.stable
-                        ? 'Nivel de ruido controlado.'
-                        : signal.stability == MarketStability.unstable
-                            ? 'La dirección se mantiene visible, pero la confianza se reduce.'
-                            : 'Volatilidad y ruido elevados. La dirección mostrada es un sesgo de baja confianza.',
-                  ),
-                  trailing: Text('${signal.instabilityScore.toStringAsFixed(0)}/100', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              if (aiSignal != null)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Lectura del consenso', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        Text(aiSignal.explanation),
-                      ],
-                    ),
-                  ),
-                ),
-              Row(
-                children: [
-                  Expanded(child: _Metric(label: 'Momentum', value: signal.momentumScore)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _Metric(label: 'Tendencia', value: signal.trendScore)),
-                ],
-              ),
-              Row(
-                children: [
-                  Expanded(child: _Metric(label: 'Order book', value: signal.orderBookImbalance)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _Metric(label: 'Presión vela', value: signal.bodyPressure)),
-                ],
-              ),
-              Card(
-                child: ListTile(
-                  title: const Text('Volumen reciente / referencia'),
-                  trailing: Text('${signal.volumeRatio.toStringAsFixed(2)}x'),
-                ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Contexto técnico', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      ...signal.reasons.map(
-                        (reason) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Text('• $reason'),
+                        _directionLabel,
+                        style: const TextStyle(
+                          fontSize: 44,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                      const SizedBox(height: 18),
+                      Text(
+                        '${_confidence.toStringAsFixed(0)}%',
+                        style: const TextStyle(
+                          fontSize: 38,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text('confianza del motor único'),
                     ],
-                  ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 10),
-              const Text(
-                'El sesgo UP/DOWN es probabilístico y puede cambiar durante la ronda conforme llegan nuevos datos. Una confianza baja o un mercado inestable significa que la dirección es menos fiable; no representa una garantía de resultado.',
+            ),
+            const SizedBox(height: 14),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.insights),
+                title: Text(
+                  _marketLabel,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text(
+                  'La confianza se reduce automáticamente cuando aumenta el ruido o las señales se contradicen.',
+                ),
               ),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              ],
+            ),
+            const SizedBox(height: 14),
+            Card(
+              child: const Padding(
+                padding: EdgeInsets.all(18),
+                child: Text(
+                  'El motor fusiona datos de Binance, patrones de velas, volumen, volatilidad, libro de órdenes, referencias de otros exchanges, noticias recientes sobre Bitcoin, Gemini y OpenCode en una sola salida.',
+                ),
+              ),
+            ),
+            if (prediction != null) ...[
+              const SizedBox(height: 14),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(prediction.explanation),
+                ),
+              ),
             ],
+            if (_error != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            const SizedBox(height: 18),
+            const Text(
+              'La lectura es probabilística y puede cambiar durante la ronda. No constituye una garantía de resultado ni una recomendación financiera.',
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
@@ -427,32 +298,6 @@ class _PulseScreenState extends State<PulseScreen> {
     _clock?.cancel();
     _refreshTimer?.cancel();
     _syncTimer?.cancel();
-    _symbolController.dispose();
     super.dispose();
   }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value});
-
-  final String label;
-  final double value;
-
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 4),
-              Text(
-                '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}',
-                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-      );
 }
