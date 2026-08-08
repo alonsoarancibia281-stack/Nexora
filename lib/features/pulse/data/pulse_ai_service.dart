@@ -8,8 +8,11 @@ class PulseAiService {
 
   final http.Client? _client;
   static const _endpoint = String.fromEnvironment('NEXORA_AI_ENDPOINT');
+  static const _supabaseAnonKey =
+      String.fromEnvironment('NEXORA_SUPABASE_ANON_KEY');
 
-  bool get isConfigured => _endpoint.trim().isNotEmpty;
+  bool get isConfigured =>
+      _endpoint.trim().isNotEmpty && _supabaseAnonKey.trim().isNotEmpty;
 
   Future<PulseAiConsensus?> evaluate({
     required String symbol,
@@ -24,7 +27,11 @@ class PulseAiService {
       final response = await client
           .post(
             Uri.parse(_endpoint),
-            headers: const {'content-type': 'application/json'},
+            headers: {
+              'content-type': 'application/json',
+              'apikey': _supabaseAnonKey,
+              'authorization': 'Bearer $_supabaseAnonKey',
+            },
             body: jsonEncode({
               'symbol': symbol,
               'startPrice': startPrice,
