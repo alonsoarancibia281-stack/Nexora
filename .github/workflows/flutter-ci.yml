@@ -1,0 +1,85 @@
+name: Flutter CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, 'agent/**']
+    paths-ignore:
+      - 'releases/**'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Generate Android wrapper
+        run: flutter create --platforms=android --org ai.nexora --project-name nexora_markets_ai .
+      - name: Enable Android internet access
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in text:
+              text = text.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">', '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    ' + permission)
+          path.write_text(text)
+          PY
+      - name: Build release APK
+        run: >-
+          flutter build apk --release
+          --dart-define=NEXORA_AI_ENDPOINT=https://jyifsslfjyryoypwmxmq.supabase.co/functions/v1/pulse-ai
+          --dart-define=NEXORA_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5aWZzc2xmanlyeW95cHdteG1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNTcxMTQsImV4cCI6MjEwMTczMzExNH0.QaJsLI5nyGrDQh3vc2ZghI_BKmZoogCWQVTdzEr-R50
+      - name: Prepare APK
+        run: |
+          mkdir -p releases
+          cp build/app/outputs/flutter-apk/app-release.apk releases/Nexora-MVP.apk
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mvp-android
+          path: releases/Nexora-MVP.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish APK in repository
+        if: github.event_name == 'push'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f releases/Nexora-MVP.apk
+          if git diff --cached --quiet; then
+            echo 'APK unchanged; nothing to commit.'
+          else
+            git commit -m 'build: publish Nexora MVP APK [skip ci]'
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+      - name: Publish latest GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='nexora-mvp-latest'
+          TITLE='Nexora MVP – Última APK'
+          NOTES='Última compilación Android de Nexora. Incluye Predicciones minutos BTC, contador de 5 minutos en tiempo real y motor unificado de análisis. Esta versión se actualiza automáticamente cuando el CI finaliza correctamente.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --target "${{ github.ref_name }}"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes "$NOTES" --target "${{ github.ref_name }}" --prerelease
+          fi
+          gh release upload "$TAG" releases/Nexora-MVP.apk --clobber
