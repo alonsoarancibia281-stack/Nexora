@@ -73,6 +73,26 @@ class BinanceMarketService {
         .toList();
   }
 
+  Future<({double bidVolume, double askVolume})> loadDepthVolume(
+    String symbol, {
+    int limit = 100,
+  }) async {
+    final uri = Uri.parse('$_rest/api/v3/depth').replace(queryParameters: {
+      'symbol': symbol.toUpperCase(),
+      'limit': '$limit',
+    });
+    final response = await _getWithRetry(uri);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    double sumSide(dynamic rows) => (rows as List<dynamic>).fold<double>(
+          0,
+          (sum, row) => sum + (double.tryParse('${(row as List<dynamic>)[1]}') ?? 0),
+        );
+    return (
+      bidVolume: sumSide(data['bids']),
+      askVolume: sumSide(data['asks']),
+    );
+  }
+
   Stream<double> livePrice(String symbol) async* {
     var retry = 0;
     while (true) {
