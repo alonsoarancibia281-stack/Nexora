@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nexora/features/market/domain/candle.dart';
-import 'package:nexora/features/pulse/domain/pulse_engine.dart';
-import 'package:nexora/features/pulse/domain/pulse_signal.dart';
+import 'package:nexora_markets_ai/features/market/domain/candle.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_engine.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_signal.dart';
 
 void main() {
   List<Candle> candles({required double drift, double volumeBase = 100}) {
