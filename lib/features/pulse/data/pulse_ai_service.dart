@@ -46,6 +46,8 @@ class PulseAiService {
                 'orderBookImbalance': quantitative.orderBookImbalance,
                 'volumeRatio': quantitative.volumeRatio,
                 'bodyPressure': quantitative.bodyPressure,
+                'instabilityScore': quantitative.instabilityScore,
+                'stability': quantitative.stability.name,
               },
             }),
           )
