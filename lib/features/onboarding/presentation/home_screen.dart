@@ -1,0 +1,19 @@
+import 'package:flutter/material.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Nexora Markets AI')),
+        body: const Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Bienvenido a Nexora', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            SizedBox(height: 8),
+            Text('Fase 1 activa: identidad, seguridad y permisos.'),
+            SizedBox(height: 24),
+            Card(child: Padding(padding: EdgeInsets.all(20), child: Text('El plan y los permisos se validan en el servidor.'))),
+          ]),
+        ),
+      );
+}
