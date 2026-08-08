@@ -8,4 +8,4 @@ Aplicación móvil profesional de análisis educativo y probabilístico de merca
 
 La Fase 1 está en desarrollo activo en la PR #1. Incluye arquitectura Flutter, autenticación, verificación OTP, recuperación de contraseña, consentimientos, roles, planes, permisos centralizados, seguridad del Owner, sesiones/dispositivos, RLS y pruebas.
 
-Consulta `docs/PHASE_1.md` para configuración y estado técnico.
+Consulta `docs/PHASE_1.md` y `docs/PHASE_1_CHECKLIST.md` para configuración y estado técnico.
