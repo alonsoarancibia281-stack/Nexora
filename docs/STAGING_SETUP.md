@@ -1,67 +1,53 @@
 # Nexora Markets AI — Supabase Staging
 
-## 1. Crear el proyecto
+## Estado actual
 
-Crea un proyecto nuevo en el dashboard de Supabase con nombre recomendado `nexora-staging`. Guarda de forma segura la contraseña de Postgres.
-
-Después abre **Connect** y copia:
-- Project URL
-- Publishable key
-- Project ref
+Proyecto Supabase activo:
+- Project ref: `jyifsslfjyryoypwmxmq`
+- Project URL: `https://jyifsslfjyryoypwmxmq.supabase.co`
+- Migraciones de Fase 1: aplicadas
+- Edge Functions: `register-consent`, `request-verification-code` y `verify-email-code` desplegadas y activas
+- Security Advisor: acceso anónimo a funciones `SECURITY DEFINER` endurecido
+- Performance Advisor: índices y políticas RLS optimizados
 
 La app Flutter usa únicamente Project URL + Publishable key. Nunca coloques service role keys en Flutter.
 
-## 2. Preparar secretos
+## Configuración manual pendiente en Supabase
 
-Copia localmente:
+### 1. Auth > Providers > Email
 
-```bash
-cp supabase/.env.staging.example supabase/.env.staging
-```
+Desactiva **Confirm email** para Nexora Staging. Nexora utiliza su propio flujo de verificación por código de 6 dígitos. El cliente cierra la sesión provisional inmediatamente después del registro y no permite login hasta que `profiles.email_verified` sea verdadero.
 
-Rellena el archivo local con:
+### 2. Edge Function secrets
+
+Configura en Supabase los siguientes secretos:
 - `OWNER_EMAIL`: correo propietario configurado por el responsable del proyecto.
-- `OTP_PEPPER`: secreto largo y aleatorio.
-- `RESEND_API_KEY`: API key del proveedor de correo.
-- `EMAIL_FROM`: remitente validado.
-- `APP_BASE_URL`: URL web de staging, si existe.
-- `APP_ORIGIN`: origen permitido para llamadas web administrativas.
+- `OTP_PEPPER`: secreto largo, aleatorio y de alta entropía.
+- `RESEND_API_KEY`: API key de Resend.
+- `EMAIL_FROM`: remitente validado en Resend.
+- `APP_ORIGIN`: origen web permitido cuando exista panel web.
+- `APP_BASE_URL`: URL web de staging cuando exista.
 
-Nunca hagas commit de `supabase/.env.staging`.
+`SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` son proporcionados automáticamente por el entorno de Edge Functions de Supabase.
 
-## 3. Desplegar
+Nunca guardes los secretos anteriores en Flutter ni los publiques en GitHub.
 
-Desde la raíz del repositorio:
-
-```bash
-export SUPABASE_PROJECT_REF="tu-project-ref"
-export SUPABASE_DB_PASSWORD="tu-password-db"
-bash scripts/deploy_staging.sh
-```
-
-El script:
-1. enlaza el proyecto;
-2. hace dry-run de migraciones;
-3. aplica migraciones;
-4. carga secretos;
-5. despliega las tres Edge Functions.
-
-## 4. Configurar Flutter
+## Configurar Flutter
 
 Ejecuta la app con configuración pública compile-time:
 
 ```bash
 flutter run \
-  --dart-define=SUPABASE_URL=https://TU_PROJECT.supabase.co \
+  --dart-define=SUPABASE_URL=https://jyifsslfjyryoypwmxmq.supabase.co \
   --dart-define=SUPABASE_PUBLISHABLE_KEY=TU_PUBLISHABLE_KEY \
   --dart-define=PASSWORD_RECOVERY_REDIRECT=nexora://update-password
 ```
 
-## 5. Configurar Resend
+## Configurar Resend
 
 Valida un dominio remitente en Resend y configura `EMAIL_FROM`. El OTP debe llegar como texto HTML real, no como imagen.
 
-## 6. Verificaciones de staging
+## Verificaciones de staging
 
 Prueba en este orden:
 1. registro de usuario Free;
@@ -80,6 +66,6 @@ Prueba en este orden:
 14. Owner puede abrir panel, gestionar usuarios y feature flags;
 15. Owner no puede ser suspendido/degradado por operaciones administrativas normales.
 
-## 7. No hacer todavía
+## No hacer todavía
 
 No uses staging como producción, no publiques service-role keys, no habilites pagos reales y no mezcles datos reales de clientes hasta completar revisión de seguridad, políticas legales y pruebas end-to-end.
