@@ -6,8 +6,68 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../domain/candle.dart';
 import '../domain/market_asset.dart';
 
+class OrderBookLevel {
+  const OrderBookLevel({required this.price, required this.quantity});
+
+  final double price;
+  final double quantity;
+}
+
+class OrderBookSnapshot {
+  const OrderBookSnapshot({required this.bids, required this.asks});
+
+  final List<OrderBookLevel> bids;
+  final List<OrderBookLevel> asks;
+
+  double get bidVolume =>
+      bids.fold<double>(0, (sum, level) => sum + level.quantity);
+  double get askVolume =>
+      asks.fold<double>(0, (sum, level) => sum + level.quantity);
+  double get bestBid => bids.isEmpty ? 0 : bids.first.price;
+  double get bestAsk => asks.isEmpty ? 0 : asks.first.price;
+  double get midPrice =>
+      bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0;
+  double get spreadBps =>
+      midPrice <= 0 ? 0 : (bestAsk - bestBid) / midPrice * 10000;
+  double get micropriceEdge {
+    if (bids.isEmpty || asks.isEmpty || midPrice <= 0) return 0;
+    final bidQuantity = bids.first.quantity;
+    final askQuantity = asks.first.quantity;
+    final total = bidQuantity + askQuantity;
+    final microprice = total <= 0
+        ? midPrice
+        : (bestAsk * bidQuantity + bestBid * askQuantity) / total;
+    return ((microprice - midPrice) / midPrice * 10000)
+        .clamp(-5.0, 5.0)
+        .toDouble();
+  }
+}
+
+class AggTradeSnapshot {
+  const AggTradeSnapshot({
+    required this.aggressorImbalance,
+    required this.signedVolume,
+    required this.tradeAcceleration,
+    required this.priceImpulseBps,
+    required this.trades,
+    required this.buyQuantity,
+    required this.sellQuantity,
+    required this.tradesPerSecond,
+  });
+
+  final double aggressorImbalance;
+  final double signedVolume;
+  final double tradeAcceleration;
+  final double priceImpulseBps;
+  final int trades;
+  final double buyQuantity;
+  final double sellQuantity;
+  final double tradesPerSecond;
+}
+
 class BinanceMarketService {
-  BinanceMarketService({http.Client? client}) : _client = client ?? http.Client();
+  BinanceMarketService({http.Client? client})
+      : _client = client ?? http.Client();
   final http.Client _client;
   static const _rest = 'https://api.binance.com';
   static const _ws = 'wss://stream.binance.com:9443/ws';
@@ -17,7 +77,8 @@ class BinanceMarketService {
     Object? lastError;
     for (var i = 0; i < attempts; i++) {
       try {
-        final response = await _client.get(uri).timeout(const Duration(seconds: 10));
+        final response =
+            await _client.get(uri).timeout(const Duration(seconds: 10));
         if (response.statusCode == 200) return response;
         lastError = Exception('HTTP ${response.statusCode}');
       } catch (error) {
@@ -27,29 +88,38 @@ class BinanceMarketService {
         await Future<void>.delayed(Duration(milliseconds: 500 * (i + 1)));
       }
     }
-    throw Exception('No se pudo conectar con Binance. ${lastError ?? ''}'.trim());
+    throw Exception(
+        'No se pudo conectar con Binance. ${lastError ?? ''}'.trim());
   }
 
   Future<DateTime> loadServerTime() async {
     final response = await _getWithRetry(Uri.parse('$_rest/api/v3/time'));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final millis = data['serverTime'];
-    if (millis is! num) throw const FormatException('Binance no devolvió serverTime válido.');
+    if (millis is! num)
+      throw const FormatException('Binance no devolvió serverTime válido.');
     return DateTime.fromMillisecondsSinceEpoch(millis.toInt(), isUtc: true);
   }
 
   List<MarketAsset> _parseMarket(String body) {
     final rows = jsonDecode(body) as List<dynamic>;
-    return rows.cast<Map<String, dynamic>>().where((e) => (e['symbol'] as String).endsWith('USDT')).map(MarketAsset.fromTicker).where((a) => a.price > 0 && a.volume24h > 0).toList()
+    return rows
+        .cast<Map<String, dynamic>>()
+        .where((e) => (e['symbol'] as String).endsWith('USDT'))
+        .map(MarketAsset.fromTicker)
+        .where((a) => a.price > 0 && a.volume24h > 0)
+        .toList()
       ..sort((a, b) => b.volume24h.compareTo(a.volume24h));
   }
 
   Future<List<MarketAsset>> loadUsdtMarket() async {
     final prefs = await SharedPreferences.getInstance();
     try {
-      final response = await _getWithRetry(Uri.parse('$_rest/api/v3/ticker/24hr'));
+      final response =
+          await _getWithRetry(Uri.parse('$_rest/api/v3/ticker/24hr'));
       await prefs.setString(_marketCacheKey, response.body);
-      await prefs.setInt('${_marketCacheKey}_at', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(
+          '${_marketCacheKey}_at', DateTime.now().millisecondsSinceEpoch);
       return _parseMarket(response.body);
     } catch (_) {
       final cached = prefs.getString(_marketCacheKey);
@@ -58,70 +128,184 @@ class BinanceMarketService {
     }
   }
 
+  Future<MarketAsset> loadTicker24h(String symbol) async {
+    final uri = Uri.parse('$_rest/api/v3/ticker/24hr').replace(
+      queryParameters: {'symbol': symbol.toUpperCase()},
+    );
+    final response = await _getWithRetry(uri);
+    return MarketAsset.fromTicker(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<DateTime?> cachedMarketTimestamp() async {
     final prefs = await SharedPreferences.getInstance();
     final value = prefs.getInt('${_marketCacheKey}_at');
     return value == null ? null : DateTime.fromMillisecondsSinceEpoch(value);
   }
 
-  Future<List<Candle>> loadCandles(String symbol, String interval, {int limit = 120}) async {
-    final uri = Uri.parse('$_rest/api/v3/klines').replace(queryParameters: {'symbol': symbol.toUpperCase(), 'interval': interval, 'limit': '$limit'});
+  Future<List<Candle>> loadCandles(String symbol, String interval,
+      {int limit = 120}) async {
+    final uri = Uri.parse('$_rest/api/v3/klines').replace(queryParameters: {
+      'symbol': symbol.toUpperCase(),
+      'interval': interval,
+      'limit': '$limit'
+    });
     final response = await _getWithRetry(uri);
-    return (jsonDecode(response.body) as List<dynamic>).map((e) => Candle.fromBinance(e as List<dynamic>)).toList();
+    return (jsonDecode(response.body) as List<dynamic>)
+        .map((e) => Candle.fromBinance(e as List<dynamic>))
+        .toList();
   }
 
-  Future<({double bidVolume, double askVolume})> loadDepthVolume(String symbol, {int limit = 100}) async {
+  Future<({double bidVolume, double askVolume})> loadDepthVolume(String symbol,
+      {int limit = 100}) async {
     final m = await loadDepthMetrics(symbol, limit: limit);
     return (bidVolume: m.bidVolume, askVolume: m.askVolume);
   }
 
-  Future<({double bidVolume, double askVolume, double bestBid, double bestAsk, double spreadBps, double micropriceEdge})> loadDepthMetrics(String symbol, {int limit = 100}) async {
-    final uri = Uri.parse('$_rest/api/v3/depth').replace(queryParameters: {'symbol': symbol.toUpperCase(), 'limit': '$limit'});
+  Future<OrderBookSnapshot> loadOrderBookSnapshot(
+    String symbol, {
+    int limit = 100,
+  }) async {
+    final uri = Uri.parse('$_rest/api/v3/depth').replace(
+      queryParameters: {
+        'symbol': symbol.toUpperCase(),
+        'limit': '$limit',
+      },
+    );
     final response = await _getWithRetry(uri);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final bids = (data['bids'] as List<dynamic>).cast<List<dynamic>>();
-    final asks = (data['asks'] as List<dynamic>).cast<List<dynamic>>();
-    double sumSide(List<List<dynamic>> rows) => rows.fold<double>(0, (sum, row) => sum + (double.tryParse('${row[1]}') ?? 0));
-    final bidVolume = sumSide(bids);
-    final askVolume = sumSide(asks);
-    final bestBid = bids.isEmpty ? 0.0 : double.tryParse('${bids.first[0]}') ?? 0.0;
-    final bestAsk = asks.isEmpty ? 0.0 : double.tryParse('${asks.first[0]}') ?? 0.0;
-    final bidQty = bids.isEmpty ? 0.0 : double.tryParse('${bids.first[1]}') ?? 0.0;
-    final askQty = asks.isEmpty ? 0.0 : double.tryParse('${asks.first[1]}') ?? 0.0;
-    final mid = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0.0;
-    final spreadBps = mid <= 0 ? 0.0 : (bestAsk - bestBid) / mid * 10000;
-    final topTotal = bidQty + askQty;
-    final microprice = topTotal <= 0 ? mid : (bestAsk * bidQty + bestBid * askQty) / topTotal;
-    final micropriceEdge = mid <= 0 ? 0.0 : ((microprice - mid) / mid * 10000).clamp(-5.0, 5.0).toDouble();
-    return (bidVolume: bidVolume, askVolume: askVolume, bestBid: bestBid, bestAsk: bestAsk, spreadBps: spreadBps, micropriceEdge: micropriceEdge);
+    List<OrderBookLevel> parseSide(Object? raw) =>
+        ((raw as List<dynamic>?) ?? const [])
+            .cast<List<dynamic>>()
+            .map(
+              (row) => OrderBookLevel(
+                price: double.tryParse('${row[0]}') ?? 0,
+                quantity: double.tryParse('${row[1]}') ?? 0,
+              ),
+            )
+            .where((level) => level.price > 0 && level.quantity > 0)
+            .toList(growable: false);
+    return OrderBookSnapshot(
+      bids: parseSide(data['bids']),
+      asks: parseSide(data['asks']),
+    );
   }
 
-  Future<({double aggressorImbalance, double signedVolume, double tradeAcceleration, double priceImpulseBps, int trades})> loadAggTradeMetrics(String symbol, {int limit = 500}) async {
+  Future<
+      ({
+        double bidVolume,
+        double askVolume,
+        double bestBid,
+        double bestAsk,
+        double spreadBps,
+        double micropriceEdge
+      })> loadDepthMetrics(String symbol, {int limit = 100}) async {
+    final snapshot = await loadOrderBookSnapshot(symbol, limit: limit);
+    return (
+      bidVolume: snapshot.bidVolume,
+      askVolume: snapshot.askVolume,
+      bestBid: snapshot.bestBid,
+      bestAsk: snapshot.bestAsk,
+      spreadBps: snapshot.spreadBps,
+      micropriceEdge: snapshot.micropriceEdge,
+    );
+  }
+
+  Future<AggTradeSnapshot> loadAggTradeSnapshot(
+    String symbol, {
+    int limit = 500,
+  }) async {
     final safeLimit = limit.clamp(50, 1000);
-    final uri = Uri.parse('$_rest/api/v3/aggTrades').replace(queryParameters: {'symbol': symbol.toUpperCase(), 'limit': '$safeLimit'});
+    final uri = Uri.parse('$_rest/api/v3/aggTrades').replace(
+      queryParameters: {
+        'symbol': symbol.toUpperCase(),
+        'limit': '$safeLimit',
+      },
+    );
     final response = await _getWithRetry(uri);
-    final rows = (jsonDecode(response.body) as List<dynamic>).cast<Map<String, dynamic>>();
+    final rows = (jsonDecode(response.body) as List<dynamic>)
+        .cast<Map<String, dynamic>>();
     if (rows.isEmpty) {
-      return (aggressorImbalance: 0.0, signedVolume: 0.0, tradeAcceleration: 0.0, priceImpulseBps: 0.0, trades: 0);
+      return const AggTradeSnapshot(
+        aggressorImbalance: 0,
+        signedVolume: 0,
+        tradeAcceleration: 0,
+        priceImpulseBps: 0,
+        trades: 0,
+        buyQuantity: 0,
+        sellQuantity: 0,
+        tradesPerSecond: 0,
+      );
     }
-    var buyQty = 0.0, sellQty = 0.0, signed = 0.0;
+    var buyQuantity = 0.0;
+    var sellQuantity = 0.0;
+    var signed = 0.0;
     final half = rows.length ~/ 2;
-    var firstHalfQty = 0.0, secondHalfQty = 0.0;
+    var firstHalfQuantity = 0.0;
+    var secondHalfQuantity = 0.0;
     for (var i = 0; i < rows.length; i++) {
-      final r = rows[i];
-      final qty = double.tryParse('${r['q']}') ?? 0.0;
-      final buyerMaker = r['m'] == true;
-      if (buyerMaker) { sellQty += qty; signed -= qty; } else { buyQty += qty; signed += qty; }
-      if (i < half) { firstHalfQty += qty; } else { secondHalfQty += qty; }
+      final row = rows[i];
+      final quantity = double.tryParse('${row['q']}') ?? 0;
+      final buyerMaker = row['m'] == true;
+      if (buyerMaker) {
+        sellQuantity += quantity;
+        signed -= quantity;
+      } else {
+        buyQuantity += quantity;
+        signed += quantity;
+      }
+      if (i < half) {
+        firstHalfQuantity += quantity;
+      } else {
+        secondHalfQuantity += quantity;
+      }
     }
-    final total = buyQty + sellQty;
-    final aggressorImbalance = total <= 0 ? 0.0 : ((buyQty - sellQty) / total).clamp(-1.0, 1.0).toDouble();
-    final signedVolume = total <= 0 ? 0.0 : (signed / total).clamp(-1.0, 1.0).toDouble();
-    final tradeAcceleration = firstHalfQty <= 0 ? 0.0 : ((secondHalfQty / firstHalfQty) - 1).clamp(-1.0, 1.0).toDouble();
-    final firstPrice = double.tryParse('${rows.first['p']}') ?? 0.0;
-    final lastPrice = double.tryParse('${rows.last['p']}') ?? 0.0;
-    final priceImpulseBps = firstPrice <= 0 ? 0.0 : ((lastPrice - firstPrice) / firstPrice * 10000).clamp(-20.0, 20.0).toDouble();
-    return (aggressorImbalance: aggressorImbalance, signedVolume: signedVolume, tradeAcceleration: tradeAcceleration, priceImpulseBps: priceImpulseBps, trades: rows.length);
+    final total = buyQuantity + sellQuantity;
+    final firstPrice = double.tryParse('${rows.first['p']}') ?? 0;
+    final lastPrice = double.tryParse('${rows.last['p']}') ?? 0;
+    final firstTime = (rows.first['T'] as num?)?.toInt() ?? 0;
+    final lastTime = (rows.last['T'] as num?)?.toInt() ?? firstTime;
+    final spanSeconds = ((lastTime - firstTime) / 1000).clamp(1.0, 3600.0);
+    return AggTradeSnapshot(
+      aggressorImbalance: total <= 0
+          ? 0
+          : ((buyQuantity - sellQuantity) / total).clamp(-1.0, 1.0).toDouble(),
+      signedVolume:
+          total <= 0 ? 0 : (signed / total).clamp(-1.0, 1.0).toDouble(),
+      tradeAcceleration: firstHalfQuantity <= 0
+          ? 0
+          : ((secondHalfQuantity / firstHalfQuantity) - 1)
+              .clamp(-1.0, 1.0)
+              .toDouble(),
+      priceImpulseBps: firstPrice <= 0
+          ? 0
+          : ((lastPrice - firstPrice) / firstPrice * 10000)
+              .clamp(-20.0, 20.0)
+              .toDouble(),
+      trades: rows.length,
+      buyQuantity: buyQuantity,
+      sellQuantity: sellQuantity,
+      tradesPerSecond: rows.length / spanSeconds,
+    );
+  }
+
+  Future<
+      ({
+        double aggressorImbalance,
+        double signedVolume,
+        double tradeAcceleration,
+        double priceImpulseBps,
+        int trades
+      })> loadAggTradeMetrics(String symbol, {int limit = 500}) async {
+    final snapshot = await loadAggTradeSnapshot(symbol, limit: limit);
+    return (
+      aggressorImbalance: snapshot.aggressorImbalance,
+      signedVolume: snapshot.signedVolume,
+      tradeAcceleration: snapshot.tradeAcceleration,
+      priceImpulseBps: snapshot.priceImpulseBps,
+      trades: snapshot.trades,
+    );
   }
 
   Stream<double> livePrice(String symbol) async* {

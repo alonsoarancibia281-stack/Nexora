@@ -7,7 +7,7 @@ import '../features/market/presentation/favorites_screen.dart';
 import '../features/market/presentation/market_screen.dart';
 import '../features/onboarding/presentation/home_screen.dart';
 import '../features/onboarding/presentation/splash_screen.dart';
-import '../features/pulse/presentation/pulse_screen.dart';
+import '../features/pulse/presentation/nexora_dashboard_screen.dart';
 import '../features/risk/presentation/risk_calculator_screen.dart';
 import '../features/simulator/presentation/simulator_screen.dart';
 
@@ -23,7 +23,7 @@ final appRouter = GoRouter(
     GoRoute(path: '/simulator', builder: (_, __) => const SimulatorScreen()),
     GoRoute(path: '/alerts', builder: (_, __) => const AlertsScreen()),
     GoRoute(path: '/journal', builder: (_, __) => const JournalScreen()),
-    GoRoute(path: '/pulse', builder: (_, __) => const PulseScreen()),
+    GoRoute(path: '/pulse', builder: (_, __) => const NexoraDashboardScreen()),
     GoRoute(path: '/market/:symbol', builder: (_, state) => AssetDetailScreen(symbol: state.pathParameters['symbol'] ?? 'BTCUSDT')),
   ],
 );

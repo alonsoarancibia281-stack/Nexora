@@ -84,7 +84,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Text('País: ${u['country']} · Nivel: ${u['experience']}'),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      initialValue: ['free','essential','pro','elite'].contains(u['plan']) ? u['plan'] as String : 'free',
+                      value: ['free','essential','pro','elite'].contains(u['plan']) ? u['plan'] as String : 'free',
                       items: const [DropdownMenuItem(value:'free',child:Text('Free')),DropdownMenuItem(value:'essential',child:Text('Essential')),DropdownMenuItem(value:'pro',child:Text('Pro Trader')),DropdownMenuItem(value:'elite',child:Text('Elite AI'))],
                       onChanged: isOwner ? null : (plan) async { if (plan == null) return; if (!await _confirm('Cambiar plan','¿Cambiar el plan de este usuario a $plan?')) return; await admin.setPlan(u['user_id'].toString(), plan); _refresh(); },
                       decoration: const InputDecoration(labelText: 'Plan'),
