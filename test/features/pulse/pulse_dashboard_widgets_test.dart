@@ -6,6 +6,7 @@ import 'package:nexora_markets_ai/features/pulse/domain/pulse_decision_gate.dart
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_ensemble_100.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_round_tracker.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_signal.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/futures_trade_planner.dart';
 import 'package:nexora_markets_ai/features/pulse/presentation/pulse_dashboard_widgets.dart';
 
 void main() {
@@ -87,6 +88,31 @@ void main() {
                   knowledgeMultiplier: .82,
                   auditPassed: true,
                 ),
+                FuturesTradePlanPanel(
+                  plan: const FuturesTradePlan(
+                    action: FuturesTradeAction.long,
+                    reason: 'Confluencia confirmada.',
+                    requestedMargin: 25,
+                    requiredMargin: 22.38,
+                    margin: 22.33,
+                    leverage: 3,
+                    notional: 67,
+                    quantity: .001,
+                    entryPrice: 67001,
+                    stopLossPrice: 66800,
+                    takeProfitPrice: 67362.80,
+                    estimatedLiquidationPrice: 44920,
+                    maximumLossUsd: .026,
+                    potentialProfitUsd: .018,
+                    expectedNetUsd: .003,
+                    riskRewardRatio: 1.8,
+                    atr: 80,
+                    fundingRate: .0000816,
+                    fundingCostUsd: 0,
+                    confidence: 63,
+                  ),
+                  validUntil: DateTime.utc(2026, 8, 9, 12, 5),
+                ),
                 const AnalystDistributionPanel(ensemble: ensemble),
                 const AnalystTeamsPanel(ensemble: ensemble),
                 MarketChartPanel(
@@ -117,5 +143,7 @@ void main() {
     expect(find.text('ALTA ↑'), findsOneWidget);
     expect(find.text('68 (68%)'), findsNWidgets(2));
     expect(find.textContaining('Tendencia'), findsOneWidget);
+    expect(find.text('COMPRAR / LONG'), findsOneWidget);
+    expect(find.text('22.33 USDT'), findsNWidgets(2));
   });
 }

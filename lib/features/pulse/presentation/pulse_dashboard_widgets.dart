@@ -8,6 +8,7 @@ import '../domain/pulse_decision_gate.dart';
 import '../domain/pulse_ensemble_100.dart';
 import '../domain/pulse_round_tracker.dart';
 import '../domain/pulse_signal.dart';
+import '../domain/futures_trade_planner.dart';
 
 const nexoraGreen = Color(0xFF37E477);
 const nexoraRed = Color(0xFFFF555F);
@@ -196,7 +197,7 @@ class NexoraDashboardHeader extends StatelessWidget {
             value: '#$roundNumber',
           ),
           _HeaderBlock(
-            label: 'BTC/USDT',
+            label: 'BTCUSDT PERP.',
             value: price <= 0 ? '—' : _price(price),
             valueColor: nexoraGreen,
             suffix: price <= 0
@@ -210,7 +211,7 @@ class NexoraDashboardHeader extends StatelessWidget {
           ),
           _HeaderBlock(
             label: 'FUENTE',
-            value: loading ? 'ACTUALIZANDO' : 'BINANCE REAL',
+            value: loading ? 'ACTUALIZANDO' : 'BINANCE USDⓈ-M',
             valueColor: loading ? nexoraAmber : nexoraGreen,
           ),
         ],
@@ -439,6 +440,182 @@ class PredictionPanel extends StatelessWidget {
   }
 }
 
+class FuturesTradePlanPanel extends StatelessWidget {
+  const FuturesTradePlanPanel({
+    super.key,
+    required this.plan,
+    required this.validUntil,
+  });
+
+  final FuturesTradePlan? plan;
+  final DateTime? validUntil;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = plan;
+    final actionable = current?.actionable == true;
+    final isLong = current?.action == FuturesTradeAction.long;
+    final color = !actionable
+        ? nexoraAmber
+        : isLong
+            ? nexoraGreen
+            : nexoraRed;
+    final end = validUntil?.toLocal();
+    final validity = end == null
+        ? '—'
+        : '${end.hour.toString().padLeft(2, '0')}:'
+            '${end.minute.toString().padLeft(2, '0')}:'
+            '${end.second.toString().padLeft(2, '0')}';
+    return NexoraPanel(
+      title: 'Plan Futures BTCUSDT Perpetual',
+      subtitle: 'USDⓈ-M · margen aislado · riesgo calculado',
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .12),
+          border: Border.all(color: color.withValues(alpha: .55)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          'AISLADO · ${current?.leverage ?? 3}x',
+          style: TextStyle(
+            color: color,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 4),
+          Text(
+            !actionable
+                ? 'NO OPERAR'
+                : isLong
+                    ? 'COMPRAR / LONG'
+                    : 'VENDER / SHORT',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: color,
+              fontSize: 25,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if (actionable) ...[
+            Text(
+              '${current!.margin.toStringAsFixed(2)} USDT',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: color,
+                fontSize: 34,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const Divider(height: 20),
+            NexoraMetricRow(
+              label: 'Modo',
+              value: 'USDⓈ-M · AISLADO · ${current.leverage}x',
+            ),
+            NexoraMetricRow(
+              label: 'Margen asignado',
+              value: '${current.margin.toStringAsFixed(2)} USDT',
+            ),
+            NexoraMetricRow(
+              label: 'Valor nocional',
+              value: '${current.notional.toStringAsFixed(2)} USDT',
+            ),
+            NexoraMetricRow(
+              label: 'Entrada límite',
+              value: '${_price(current.entryPrice)} USDT',
+              color: color,
+            ),
+            NexoraMetricRow(
+              label: 'Cantidad estimada',
+              value: '${current.quantity.toStringAsFixed(3)} BTC',
+            ),
+            NexoraMetricRow(
+              label: 'Take Profit',
+              value: '${_price(current.takeProfitPrice)} USDT',
+              color: nexoraGreen,
+            ),
+            NexoraMetricRow(
+              label: 'Stop Loss',
+              value: '${_price(current.stopLossPrice)} USDT',
+              color: nexoraRed,
+            ),
+            NexoraMetricRow(
+              label: 'Liquidación aproximada',
+              value: '${_price(current.estimatedLiquidationPrice)} USDT',
+              color: nexoraAmber,
+            ),
+            NexoraMetricRow(
+              label: 'Riesgo máximo estimado',
+              value: '${current.maximumLossUsd.toStringAsFixed(4)} USDT',
+              color: nexoraRed,
+            ),
+            NexoraMetricRow(
+              label: 'Ganancia objetivo neta estimada',
+              value: '${current.potentialProfitUsd.toStringAsFixed(4)} USDT',
+              color: nexoraGreen,
+            ),
+            NexoraMetricRow(
+              label: 'Valor esperado estimado',
+              value: '+${current.expectedNetUsd.toStringAsFixed(4)} USDT',
+              color: nexoraGreen,
+            ),
+            NexoraMetricRow(
+              label: 'Financiación vigente',
+              value: '${(current.fundingRate * 100).toStringAsFixed(4)}%',
+              color:
+                  current.fundingRate.abs() > .0005 ? nexoraAmber : nexoraMuted,
+            ),
+            NexoraMetricRow(
+              label: 'Riesgo/beneficio bruto',
+              value: '1:${current.riskRewardRatio.toStringAsFixed(1)}',
+            ),
+            NexoraMetricRow(label: 'Válido hasta', value: validity),
+          ] else ...[
+            const SizedBox(height: 7),
+            Text(
+              current?.reason ?? 'Esperando datos reales y señal bloqueada.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: nexoraMuted, fontSize: 11),
+            ),
+            if ((current?.requiredMargin ?? 0) > 0) ...[
+              const Divider(height: 20),
+              NexoraMetricRow(
+                label: 'Margen solicitado',
+                value: '${current!.requestedMargin.toStringAsFixed(2)} USDT',
+              ),
+              NexoraMetricRow(
+                label: 'Margen mínimo estimado',
+                value: '${current.requiredMargin.toStringAsFixed(2)} USDT',
+                color: nexoraAmber,
+              ),
+            ],
+          ],
+          const SizedBox(height: 10),
+          Text(
+            actionable
+                ? 'No persigas el precio. Si ejecutas el plan manualmente, usa '
+                    'STOP_MARKET y TAKE_PROFIT_MARKET para cerrar la posición.'
+                : 'La abstención protege capital cuando la evidencia no compensa el riesgo.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: nexoraMuted, fontSize: 9),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Nexora no envía órdenes. La liquidación es aproximada y ninguna estrategia garantiza ganancias.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: nexoraMuted, fontSize: 9),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AnalystDistributionPanel extends StatelessWidget {
   const AnalystDistributionPanel({super.key, required this.ensemble});
 
@@ -617,7 +794,7 @@ class MarketChartPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => NexoraPanel(
-        title: 'Gráfico BTC/USDT · 5m',
+        title: 'Gráfico BTCUSDT Perp · 5m',
         subtitle: 'Velas y volumen reales de Binance',
         trailing: Text(
           currentPrice <= 0 ? '—' : _price(currentPrice),
