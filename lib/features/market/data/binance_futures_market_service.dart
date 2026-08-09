@@ -254,7 +254,7 @@ class BinanceFuturesMarketService {
         rules.quantityStep <= 0 ||
         rules.minimumQuantity <= 0 ||
         rules.minimumNotional <= 0) {
-      throw const FormatException('Filtros de BTCUSDT incompletos.');
+      throw FormatException('Filtros de $normalized incompletos.');
     }
     _rulesCache[normalized] = rules;
     return rules;

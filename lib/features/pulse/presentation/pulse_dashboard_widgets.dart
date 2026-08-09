@@ -448,13 +448,62 @@ class PredictionPanel extends StatelessWidget {
   }
 }
 
+class FuturesSymbolSelector extends StatelessWidget {
+  const FuturesSymbolSelector({
+    super.key,
+    required this.symbols,
+    required this.selectedSymbol,
+    required this.onChanged,
+  });
+
+  final List<String> symbols;
+  final String selectedSymbol;
+  final ValueChanged<String> onChanged;
+
+  String _labelFor(String symbol) {
+    final base = symbol.endsWith('USDT')
+        ? symbol.substring(0, symbol.length - 'USDT'.length)
+        : symbol;
+    return '$base / USDT Perpetual';
+  }
+
+  @override
+  Widget build(BuildContext context) => NexoraPanel(
+        title: 'Mercado Futures',
+        subtitle: 'El pool analizará el contrato seleccionado con datos reales',
+        child: DropdownButtonFormField<String>(
+          value: selectedSymbol,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF101820),
+          decoration: const InputDecoration(
+            labelText: 'Criptomoneda',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          items: symbols
+              .map(
+                (symbol) => DropdownMenuItem<String>(
+                  value: symbol,
+                  child: Text(_labelFor(symbol)),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: (symbol) {
+            if (symbol != null) onChanged(symbol);
+          },
+        ),
+      );
+}
+
 class FuturesTradePlanPanel extends StatelessWidget {
   const FuturesTradePlanPanel({
     super.key,
+    required this.symbol,
     required this.plan,
     required this.validUntil,
   });
 
+  final String symbol;
   final FuturesTradePlan? plan;
   final DateTime? validUntil;
 
@@ -474,8 +523,11 @@ class FuturesTradePlanPanel extends StatelessWidget {
         : '${end.hour.toString().padLeft(2, '0')}:'
             '${end.minute.toString().padLeft(2, '0')}:'
             '${end.second.toString().padLeft(2, '0')}';
+    final baseAsset = symbol.endsWith('USDT')
+        ? symbol.substring(0, symbol.length - 'USDT'.length)
+        : symbol;
     return NexoraPanel(
-      title: 'Plan Futures BTCUSDT Perpetual',
+      title: 'Plan Futures $symbol Perpetual',
       subtitle: 'USDⓈ-M · margen aislado · riesgo calculado',
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
@@ -522,6 +574,11 @@ class FuturesTradePlanPanel extends StatelessWidget {
             ),
             const Divider(height: 20),
             NexoraMetricRow(
+              label: 'Operación',
+              value: isLong ? 'COMPRA · LONG' : 'VENTA · SHORT',
+              color: color,
+            ),
+            NexoraMetricRow(
               label: 'Modo',
               value: 'USDⓈ-M · AISLADO · ${current.leverage}x',
             ),
@@ -540,7 +597,7 @@ class FuturesTradePlanPanel extends StatelessWidget {
             ),
             NexoraMetricRow(
               label: 'Cantidad estimada',
-              value: '${current.quantity.toStringAsFixed(3)} BTC',
+              value: '${current.quantity.toStringAsFixed(3)} $baseAsset',
             ),
             NexoraMetricRow(
               label: 'Take Profit',
@@ -832,10 +889,12 @@ class MicrostructurePanel extends StatelessWidget {
     super.key,
     required this.book,
     required this.trades,
+    this.baseAsset = 'BTC',
   });
 
   final OrderBookSnapshot? book;
   final AggTradeSnapshot? trades;
+  final String baseAsset;
 
   @override
   Widget build(BuildContext context) {
@@ -917,7 +976,7 @@ class MicrostructurePanel extends StatelessWidget {
             label: 'Volumen comprador / vendedor',
             value: trades == null
                 ? '—'
-                : '${trades!.buyQuantity.toStringAsFixed(2)} / ${trades!.sellQuantity.toStringAsFixed(2)} BTC',
+                : '${trades!.buyQuantity.toStringAsFixed(2)} / ${trades!.sellQuantity.toStringAsFixed(2)} $baseAsset',
           ),
         ],
       ),
@@ -1588,7 +1647,12 @@ String _analystFamilyLabel(AnalystFamily family) => switch (family) {
     };
 
 String _price(double value) {
-  final fixed = value.toStringAsFixed(2);
+  final decimals = value.abs() < 10
+      ? 4
+      : value.abs() < 100
+          ? 3
+          : 2;
+  final fixed = value.toStringAsFixed(decimals);
   final parts = fixed.split('.');
   final digits = parts.first;
   final buffer = StringBuffer();

@@ -115,6 +115,55 @@ void main() {
     expect(plan.action, FuturesTradeAction.noTrade);
     expect(plan.reason, contains('confluencia'));
   });
+
+  test('crea un plan SOLUSDT de 5 USDT con filtros propios del símbolo', () {
+    const solRules = SymbolTradingRules(
+      symbol: 'SOLUSDT',
+      tickSize: .001,
+      quantityStep: .01,
+      minimumQuantity: .01,
+      minimumNotional: 5,
+    );
+    final solPremium = FuturesPremiumSnapshot(
+      markPrice: 77,
+      indexPrice: 77.01,
+      fundingRate: .00005,
+      nextFundingTime: now.add(const Duration(hours: 4)),
+    );
+    final plan = planner.build(
+      decision: _decision(PulseDirection.up, .72, now),
+      entryCandles: _candles(
+        up: true,
+        intervalMinutes: 1,
+        basePrice: 76,
+        step: .03,
+        range: .08,
+        openDelta: .02,
+      ),
+      contextCandles: _candles(
+        up: true,
+        intervalMinutes: 5,
+        basePrice: 76,
+        step: .03,
+        range: .08,
+        openDelta: .02,
+      ),
+      bestBid: 76.999,
+      bestAsk: 77,
+      analystAgreement: .70,
+      statisticalQuality: .25,
+      instability: 20,
+      rules: solRules,
+      premium: solPremium,
+      validUntil: validUntil,
+    );
+
+    expect(plan.action, FuturesTradeAction.long);
+    expect(plan.margin, lessThanOrEqualTo(5));
+    expect(plan.quantity, greaterThanOrEqualTo(.06));
+    expect(plan.stopLossPrice, lessThan(plan.entryPrice));
+    expect(plan.takeProfitPrice, greaterThan(plan.entryPrice));
+  });
 }
 
 LockedPulseDecision _decision(
@@ -131,17 +180,21 @@ LockedPulseDecision _decision(
 List<Candle> _candles({
   required bool up,
   required int intervalMinutes,
+  double basePrice = 64850,
+  double step = 6,
+  double range = 12,
+  double openDelta = 2,
 }) =>
     List.generate(30, (index) {
       final direction = up ? 1 : -1;
-      final close = 64850 + direction * index * 6.0;
+      final close = basePrice + direction * index * step;
       return Candle(
         openTime: DateTime.utc(2026, 8, 9, 8).add(
           Duration(minutes: intervalMinutes * index),
         ),
-        open: close - direction * 2,
-        high: close + 12,
-        low: close - 12,
+        open: close - direction * openDelta,
+        high: close + range,
+        low: close - range,
         close: close,
         volume: 100 + index.toDouble(),
       );

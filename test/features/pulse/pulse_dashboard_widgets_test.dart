@@ -89,6 +89,7 @@ void main() {
                   auditPassed: true,
                 ),
                 FuturesTradePlanPanel(
+                  symbol: 'BTCUSDT',
                   plan: const FuturesTradePlan(
                     action: FuturesTradeAction.long,
                     reason: 'Confluencia confirmada.',
@@ -144,7 +145,40 @@ void main() {
     expect(find.text('68 (68%)'), findsNWidgets(2));
     expect(find.textContaining('Tendencia'), findsOneWidget);
     expect(find.text('COMPRAR / LONG'), findsOneWidget);
+    expect(find.text('COMPRA · LONG'), findsOneWidget);
+    expect(find.text('Take Profit'), findsOneWidget);
+    expect(find.text('Stop Loss'), findsOneWidget);
     expect(find.text('22.33 USDT'), findsNWidgets(2));
+  });
+
+  testWidgets('selector Futures cambia el contrato perpetuo', (tester) async {
+    String? selected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: FuturesSymbolSelector(
+            symbols: const [
+              'BTCUSDT',
+              'ETHUSDT',
+              'SOLUSDT',
+              'BNBUSDT',
+              'XRPUSDT',
+            ],
+            selectedSymbol: 'BTCUSDT',
+            onChanged: (symbol) => selected = symbol,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('BTC / USDT Perpetual'), findsOneWidget);
+    await tester.tap(find.text('BTC / USDT Perpetual'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SOL / USDT Perpetual').last);
+    await tester.pumpAndSettle();
+
+    expect(selected, 'SOLUSDT');
   });
 
   testWidgets('Futures usa una identidad distinta de Predicciones',

@@ -33,6 +33,14 @@ class NexoraFuturesDashboardScreen extends StatefulWidget {
 
 class _NexoraFuturesDashboardScreenState
     extends State<NexoraFuturesDashboardScreen> {
+  static const _supportedSymbols = <String>[
+    'BTCUSDT',
+    'ETHUSDT',
+    'SOLUSDT',
+    'BNBUSDT',
+    'XRPUSDT',
+  ];
+
   final _service = BinanceFuturesMarketService();
   final _engine = const PulseEngine();
   final _ai = const PulseAiService();
@@ -72,21 +80,62 @@ class _NexoraFuturesDashboardScreenState
   bool _loadInFlight = false;
   bool _clockSyncInFlight = false;
   bool _roundTransitionInFlight = false;
+  bool _roundRestartRequested = false;
   String? _error;
   double? _startPrice;
   double _currentPrice = 0;
   double _rawProbabilityUp = .5;
-  double _ethConfirmation = 0;
+  double _intermarketConfirmation = 0;
+  String _symbol = 'BTCUSDT';
 
   DateTime get _binanceNow => DateTime.now().toUtc().add(_binanceOffset);
+
+  String get _baseAsset => _symbol.substring(0, _symbol.length - 'USDT'.length);
+
+  String get _confirmationSymbol =>
+      _symbol == 'BTCUSDT' ? 'ETHUSDT' : 'BTCUSDT';
 
   PulseCalibrationMetrics get _metrics =>
       PulseCalibrationMetrics.fromOutcomes(_outcomes);
 
   bool get _historicalAuditPassed {
+    if (_symbol != 'BTCUSDT') return true;
     final metrics = _metrics;
     return metrics.samples < 30 ||
         (metrics.accuracy > .5 && metrics.brierScore < .25);
+  }
+
+  Future<void> _changeSymbol(String symbol) async {
+    if (symbol == _symbol || !_supportedSymbols.contains(symbol)) return;
+    setState(() {
+      _symbol = symbol;
+      _roundStart = null;
+      _roundEnd = null;
+      _tickerLoadedAt = null;
+      _signal = null;
+      _aiPrediction = null;
+      _mathPrediction = null;
+      _statPrediction = null;
+      _logisticPrediction = null;
+      _ensemblePrediction = null;
+      _lockedDecision = null;
+      _futuresPlan = null;
+      _book = null;
+      _trades = null;
+      _ticker = null;
+      _tradingRules = null;
+      _candles5m = const [];
+      _roundObservations = [];
+      _probabilityTrail = [];
+      _startPrice = null;
+      _currentPrice = 0;
+      _rawProbabilityUp = .5;
+      _intermarketConfirmation = 0;
+      _loading = true;
+      _error = null;
+    });
+    _decisionGate.reset();
+    await _startCurrentRound();
   }
 
   @override
@@ -147,7 +196,10 @@ class _NexoraFuturesDashboardScreenState
   }
 
   Future<void> _startCurrentRound() async {
-    if (_roundTransitionInFlight) return;
+    if (_roundTransitionInFlight) {
+      _roundRestartRequested = true;
+      return;
+    }
     _roundTransitionInFlight = true;
     try {
       await _syncBinanceClock();
@@ -183,15 +235,22 @@ class _NexoraFuturesDashboardScreenState
       await _load();
     } finally {
       _roundTransitionInFlight = false;
+      if (_roundRestartRequested && mounted) {
+        _roundRestartRequested = false;
+        unawaited(_startCurrentRound());
+      }
     }
   }
 
   Future<void> _finalizeRound(DateTime roundStart) async {
+    // The persisted calibration history currently belongs to the BTC model.
+    // Keeping other markets out prevents cross-symbol contamination.
+    if (_symbol != 'BTCUSDT') return;
     final startPrice = _startPrice;
     if (startPrice == null || startPrice <= 0) return;
     var endPrice = _currentPrice;
     try {
-      final candles = await _service.loadCandles('BTCUSDT', '5m', limit: 5);
+      final candles = await _service.loadCandles(_symbol, '5m', limit: 5);
       for (final candle in candles) {
         if (candle.openTime.toUtc().millisecondsSinceEpoch ==
             roundStart.millisecondsSinceEpoch) {
@@ -216,6 +275,8 @@ class _NexoraFuturesDashboardScreenState
   Future<void> _load({bool silent = false}) async {
     if (_loadInFlight) return;
     _loadInFlight = true;
+    final requestedSymbol = _symbol;
+    final requestedConfirmationSymbol = _confirmationSymbol;
     if (!silent && mounted) {
       setState(() {
         _loading = true;
@@ -227,20 +288,20 @@ class _NexoraFuturesDashboardScreenState
           DateTime.now().difference(_tickerLoadedAt!) >
               const Duration(seconds: 30);
       final results = await Future.wait<Object?>([
-        _service.loadCandles('BTCUSDT', '1m', limit: 90),
-        _service.loadCandles('BTCUSDT', '5m', limit: 60),
-        _service.loadCandles('ETHUSDT', '1m', limit: 30),
-        _service.loadOrderBookSnapshot('BTCUSDT', limit: 100),
-        _service.loadAggTradeSnapshot('BTCUSDT', limit: 500),
+        _service.loadCandles(requestedSymbol, '1m', limit: 90),
+        _service.loadCandles(requestedSymbol, '5m', limit: 60),
+        _service.loadCandles(requestedConfirmationSymbol, '1m', limit: 30),
+        _service.loadOrderBookSnapshot(requestedSymbol, limit: 100),
+        _service.loadAggTradeSnapshot(requestedSymbol, limit: 500),
         tickerIsStale
-            ? _service.loadTicker24h('BTCUSDT')
+            ? _service.loadTicker24h(requestedSymbol)
             : Future<MarketAsset?>.value(_ticker),
-        _loadTradingRulesOrNull(),
-        _service.loadPremiumSnapshot('BTCUSDT'),
+        _loadTradingRulesOrNull(requestedSymbol),
+        _service.loadPremiumSnapshot(requestedSymbol),
       ]);
       final candles1m = results[0] as List<Candle>;
       final candles5m = results[1] as List<Candle>;
-      final ethCandles = results[2] as List<Candle>;
+      final confirmationCandles = results[2] as List<Candle>;
       final book = results[3] as OrderBookSnapshot;
       final trades = results[4] as AggTradeSnapshot;
       final ticker = results[5] as MarketAsset?;
@@ -271,7 +332,7 @@ class _NexoraFuturesDashboardScreenState
       PulseProbabilityResult? mathPrediction;
       PulseStatisticalResult? statPrediction;
       PulseEnsemble100Result? ensemblePrediction;
-      var ethConfirmation = 0.0;
+      var intermarketConfirmation = 0.0;
       if (startPrice != null) {
         mathPrediction = _calibrator.calibrate(
           score: signal.score,
@@ -290,7 +351,7 @@ class _NexoraFuturesDashboardScreenState
         );
         final analystInput = _buildAnalystInput(
           candles: candles1m,
-          ethCandles: ethCandles,
+          confirmationCandles: confirmationCandles,
           signal: signal,
           stat: statPrediction,
           startPrice: startPrice,
@@ -299,7 +360,7 @@ class _NexoraFuturesDashboardScreenState
           trades: trades,
           premium: premium,
         );
-        ethConfirmation = analystInput.get('ethConfirmation');
+        intermarketConfirmation = analystInput.get('ethConfirmation');
         ensemblePrediction = _ensemble100.analyze(analystInput);
       }
 
@@ -308,12 +369,18 @@ class _NexoraFuturesDashboardScreenState
           : candles5m
               .where((candle) => candle.openTime.toUtc().isBefore(start))
               .toList(growable: false);
-      final logisticPrediction = _logistic5m.analyze(completed5m);
+      final logisticPrediction = requestedSymbol == 'BTCUSDT'
+          ? _logistic5m.analyze(completed5m)
+          : const Btc5mLogisticResult(
+              probabilityUp: .5,
+              logit: 0,
+              isReady: false,
+            );
 
       var aiPrediction = _aiPrediction;
       if (startPrice != null && aiPrediction == null && _ai.isConfigured) {
         aiPrediction = await _ai.evaluate(
-          symbol: 'BTCUSDT',
+          symbol: requestedSymbol,
           startPrice: startPrice,
           currentPrice: currentPrice,
           secondsRemaining: secondsRemaining,
@@ -398,7 +465,7 @@ class _NexoraFuturesDashboardScreenState
         );
       }
 
-      if (!mounted) return;
+      if (!mounted || requestedSymbol != _symbol) return;
       setState(() {
         _candles5m = candles5m;
         _book = book;
@@ -417,14 +484,14 @@ class _NexoraFuturesDashboardScreenState
         _futuresPlan = futuresPlan;
         _tradingRules = tradingRules ?? _tradingRules;
         _rawProbabilityUp = rawProbability;
-        _ethConfirmation = ethConfirmation;
+        _intermarketConfirmation = intermarketConfirmation;
         _probabilityTrail = trail;
         _roundObservations = observations;
         _loading = false;
         _error = null;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || requestedSymbol != _symbol) return;
       setState(() {
         _loading = false;
         _error =
@@ -432,13 +499,16 @@ class _NexoraFuturesDashboardScreenState
       });
     } finally {
       _loadInFlight = false;
+      if (mounted && requestedSymbol != _symbol) {
+        unawaited(_load());
+      }
     }
   }
 
-  Future<SymbolTradingRules?> _loadTradingRulesOrNull() async {
+  Future<SymbolTradingRules?> _loadTradingRulesOrNull(String symbol) async {
     if (_tradingRules != null) return _tradingRules;
     try {
-      return await _service.loadTradingRules('BTCUSDT');
+      return await _service.loadTradingRules(symbol);
     } catch (_) {
       return null;
     }
@@ -446,7 +516,7 @@ class _NexoraFuturesDashboardScreenState
 
   AnalystInput _buildAnalystInput({
     required List<Candle> candles,
-    required List<Candle> ethCandles,
+    required List<Candle> confirmationCandles,
     required PulseSignal signal,
     required PulseStatisticalResult stat,
     required double startPrice,
@@ -493,12 +563,14 @@ class _NexoraFuturesDashboardScreenState
     final rangeExpansion = averageRange <= 0
         ? 0.0
         : ((lastRange / averageRange) - 1).clamp(-1.0, 1.0).toDouble();
-    final ethCloses =
-        ethCandles.map((candle) => candle.close).toList(growable: false);
-    final ethReturn = ethCloses.length < 4
+    final confirmationCloses = confirmationCandles
+        .map((candle) => candle.close)
+        .toList(growable: false);
+    final confirmationReturn = confirmationCloses.length < 4
         ? 0.0
-        : (ethCloses.last - ethCloses[ethCloses.length - 4]) /
-            ethCloses[ethCloses.length - 4] *
+        : (confirmationCloses.last -
+                confirmationCloses[confirmationCloses.length - 4]) /
+            confirmationCloses[confirmationCloses.length - 4] *
             100;
     final fundingPressure = norm(-premium.fundingRate, .0005);
     final basisPressure = norm(-premium.basisBps, 12);
@@ -532,9 +604,11 @@ class _NexoraFuturesDashboardScreenState
         'bodyPressure': signal.bodyPressure / 100,
         'breakoutQuality': norm(trades.priceImpulseBps, 10),
         'wickBias': signal.bodyPressure / 100,
-        'ethConfirmation': norm(ethReturn, .25),
+        // The ensemble feature keeps its historic key, but it now represents
+        // ETH confirmation for BTC and BTC confirmation for every altcoin.
+        'ethConfirmation': norm(confirmationReturn, .25),
         'exchangeConsensus': fundingPressure * .55 + basisPressure * .45,
-        'betaResidual': norm(shortReturn - ethReturn, .25),
+        'betaResidual': norm(shortReturn - confirmationReturn, .25),
         'regimeTrend': signal.trendScore / 100,
         'regimePersistence': stat.autocorrelation.clamp(-1.0, 1.0).toDouble(),
         'roundEdge': norm(
@@ -610,7 +684,7 @@ class _NexoraFuturesDashboardScreenState
     required PulseEnsemble100Result? ensemble,
   }) {
     final metrics = _metrics;
-    final observedAdvantage = metrics.samples < 30
+    final observedAdvantage = _symbol != 'BTCUSDT' || metrics.samples < 30
         ? .5
         : (.5 + (metrics.accuracy - .5) * 5).clamp(0.0, 1.0).toDouble();
     return _knowledge.confidenceMultiplier(
@@ -737,7 +811,7 @@ class _NexoraFuturesDashboardScreenState
     final stable = (_signal?.instabilityScore ?? 100) <= 72;
     final spreadOk = (_book?.spreadBps ?? 99) <= 2;
     final technical = (_signal?.agreementRatio ?? 0) >= .55;
-    final ethAligned = _ethConfirmation.abs() >= .08;
+    final intermarketAligned = _intermarketConfirmation.abs() >= .08;
     return [
       KnowledgeEntry(
         source: 'Graham',
@@ -755,9 +829,11 @@ class _NexoraFuturesDashboardScreenState
       KnowledgeEntry(
         source: 'Malkiel / Taleb',
         focus: 'azar y robustez',
-        status: metrics.samples < 30
-            ? 'MUESTRA CORTA'
-            : (_historicalAuditPassed ? 'SUPERA BASE' : 'VETO'),
+        status: _symbol != 'BTCUSDT'
+            ? 'SIN HISTORIAL'
+            : metrics.samples < 30
+                ? 'MUESTRA CORTA'
+                : (_historicalAuditPassed ? 'SUPERA BASE' : 'VETO'),
         positive: _historicalAuditPassed,
       ),
       KnowledgeEntry(
@@ -788,9 +864,9 @@ class _NexoraFuturesDashboardScreenState
       ),
       KnowledgeEntry(
         source: 'Lynch',
-        focus: 'contexto BTC/ETH',
-        status: ethAligned ? 'ACTIVO' : 'NEUTRO',
-        positive: ethAligned,
+        focus: 'contexto $_symbol/$_confirmationSymbol',
+        status: intermarketAligned ? 'ACTIVO' : 'NEUTRO',
+        positive: intermarketAligned,
       ),
       KnowledgeEntry(
         source: 'Kahneman',
@@ -905,7 +981,13 @@ class _NexoraFuturesDashboardScreenState
               final distributionPanel = AnalystDistributionPanel(
                 ensemble: _ensemblePrediction,
               );
+              final selectorPanel = FuturesSymbolSelector(
+                symbols: _supportedSymbols,
+                selectedSymbol: _symbol,
+                onChanged: (symbol) => unawaited(_changeSymbol(symbol)),
+              );
               final futuresPlanPanel = FuturesTradePlanPanel(
+                symbol: _symbol,
                 plan: _futuresPlan,
                 validUntil: _roundEnd,
               );
@@ -920,15 +1002,12 @@ class _NexoraFuturesDashboardScreenState
                 currentPrice: _currentPrice,
                 boxHigh: breakout.boxHigh,
                 boxLow: breakout.boxLow,
-                title: 'Gráfico BTCUSDT Perp · 5m',
+                title: 'Gráfico $_symbol Perp · 5m',
               );
               final microstructurePanel = MicrostructurePanel(
                 book: _book,
                 trades: _trades,
-              );
-              final qualityPanel = QualityPanel(
-                metrics: _metrics,
-                statisticalQuality: _statPrediction?.signalQuality ?? 0,
+                baseAsset: _baseAsset,
               );
               final biasPanel = AuditPanel(
                 title: 'Detector de sesgos · Kahneman',
@@ -953,10 +1032,7 @@ class _NexoraFuturesDashboardScreenState
                           children: [
                             Expanded(
                               flex: 22,
-                              child: desktopColumn([
-                                futuresPlanPanel,
-                                qualityPanel,
-                              ]),
+                              child: desktopColumn([futuresPlanPanel]),
                             ),
                             const SizedBox(width: gap),
                             Expanded(
@@ -1000,7 +1076,6 @@ class _NexoraFuturesDashboardScreenState
                           width: widthFor(1),
                           child: microstructurePanel,
                         ),
-                        SizedBox(width: widthFor(1), child: qualityPanel),
                         SizedBox(width: widthFor(1), child: biasPanel),
                         SizedBox(width: widthFor(1), child: breakoutPanel),
                       ],
@@ -1019,7 +1094,7 @@ class _NexoraFuturesDashboardScreenState
                       loading: _loading || _loadInFlight,
                       brandTitle: 'NEXORA FUTURES',
                       brandSubtitle: 'PLAN USDⓈ-M · POOL DE 100 ANALISTAS',
-                      symbolLabel: 'BTCUSDT PERP.',
+                      symbolLabel: '$_symbol PERP.',
                       sourceLabel: 'BINANCE USDⓈ-M',
                       onBack: Navigator.of(context).canPop()
                           ? () => Navigator.of(context).pop()
@@ -1044,6 +1119,8 @@ class _NexoraFuturesDashboardScreenState
                         ),
                       ),
                     ],
+                    const SizedBox(height: gap),
+                    selectorPanel,
                     const SizedBox(height: gap),
                     overview,
                     const SizedBox(height: 14),

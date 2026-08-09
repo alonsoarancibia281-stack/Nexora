@@ -191,10 +191,13 @@ class FuturesTradePlanner {
     final requiredNotional = minimumQuantity * entry;
     final requiredMargin = _ceilCents(requiredNotional / safeLeverage * 1.002);
     if (requestedMargin + .000001 < requiredMargin) {
+      final baseAsset = rules.symbol.endsWith('USDT')
+          ? rules.symbol.substring(0, rules.symbol.length - 'USDT'.length)
+          : rules.symbol;
       return abstain(
         'Con ${requestedMargin.toStringAsFixed(2)} USDT y ${safeLeverage}x '
         'Binance rechazaría la orden. El mínimo actual de '
-        '${minimumQuantity.toStringAsFixed(3)} BTC requiere cerca de '
+        '${minimumQuantity.toStringAsFixed(3)} $baseAsset requiere cerca de '
         '${requiredMargin.toStringAsFixed(2)} USDT de margen aislado.',
         requiredMargin: requiredMargin,
       );
