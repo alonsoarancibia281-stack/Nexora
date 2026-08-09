@@ -112,7 +112,7 @@ class _JournalScreenState extends State<JournalScreen> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            initialValue: outcome,
+            value: outcome,
             decoration: const InputDecoration(labelText: 'Resultado', border: OutlineInputBorder()),
             items: ['Pendiente', 'Ganancia', 'Pérdida', 'Neutral']
                 .map((x) => DropdownMenuItem(value: x, child: Text(x)))

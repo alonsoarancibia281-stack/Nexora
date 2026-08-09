@@ -66,6 +66,9 @@ class PulseEnsemble100Result {
     required this.probabilityUp,
     required this.confidence,
     required this.activeAnalysts,
+    required this.upAnalysts,
+    required this.downAnalysts,
+    required this.neutralAnalysts,
     required this.agreement,
     required this.teamOpinions,
   });
@@ -73,6 +76,9 @@ class PulseEnsemble100Result {
   final double probabilityUp;
   final double confidence;
   final int activeAnalysts;
+  final int upAnalysts;
+  final int downAnalysts;
+  final int neutralAnalysts;
   final double agreement;
   final List<TeamOpinion> teamOpinions;
 }
@@ -105,6 +111,13 @@ class PulseEnsemble100 {
         probabilityUp: .5,
         confidence: 50,
         activeAnalysts: opinions.length,
+        upAnalysts:
+            opinions.where((o) => o.direction == AnalystDirection.up).length,
+        downAnalysts:
+            opinions.where((o) => o.direction == AnalystDirection.down).length,
+        neutralAnalysts: opinions
+            .where((o) => o.direction == AnalystDirection.neutral)
+            .length,
         agreement: 0,
         teamOpinions: teams,
       );
@@ -126,13 +139,19 @@ class PulseEnsemble100 {
     pUp = pUp.clamp(.05, .95).toDouble();
 
     final majorityUp = opinions.where((o) => o.probabilityUp >= .5).length;
-    final agreement = math.max(majorityUp, opinions.length - majorityUp) /
-        opinions.length;
+    final agreement =
+        math.max(majorityUp, opinions.length - majorityUp) / opinions.length;
 
     return PulseEnsemble100Result(
       probabilityUp: pUp,
       confidence: math.max(pUp, 1 - pUp) * 100,
       activeAnalysts: opinions.length,
+      upAnalysts:
+          opinions.where((o) => o.direction == AnalystDirection.up).length,
+      downAnalysts:
+          opinions.where((o) => o.direction == AnalystDirection.down).length,
+      neutralAnalysts:
+          opinions.where((o) => o.direction == AnalystDirection.neutral).length,
       agreement: agreement,
       teamOpinions: teams,
     );
@@ -193,9 +212,8 @@ class PulseEnsemble100 {
     edge = (edge + jitter).clamp(-1.0, 1.0);
     final temperature = .18 + variant * .008;
     final pUp = 1 / (1 + math.exp(-edge / temperature));
-    final quality = (edge.abs() * (1 - input.instability / 125))
-        .clamp(0.0, 1.0)
-        .toDouble();
+    final quality =
+        (edge.abs() * (1 - input.instability / 125)).clamp(0.0, 1.0).toDouble();
     final reliability = (.45 + variant * .02).clamp(.45, .63).toDouble();
 
     return AnalystOpinion(
