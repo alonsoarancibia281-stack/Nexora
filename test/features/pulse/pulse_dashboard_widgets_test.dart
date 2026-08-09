@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexora_markets_ai/features/market/data/binance_market_service.dart';
 import 'package:nexora_markets_ai/features/market/domain/candle.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_decision_gate.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_ensemble_100.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_round_tracker.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_signal.dart';
 import 'package:nexora_markets_ai/features/pulse/presentation/pulse_dashboard_widgets.dart';
 
 void main() {
@@ -33,7 +35,14 @@ void main() {
       downAnalysts: 17,
       neutralAnalysts: 15,
       agreement: .68,
-      teamOpinions: [],
+      teamOpinions: [
+        TeamOpinion(
+          family: AnalystFamily.trend,
+          probabilityUp: .63,
+          quality: .35,
+          disagreement: .12,
+        ),
+      ],
     );
     const book = OrderBookSnapshot(
       bids: [OrderBookLevel(price: 67000, quantity: 1.2)],
@@ -65,7 +74,21 @@ void main() {
                   loading: false,
                   onBack: null,
                 ),
+                PredictionPanel(
+                  decision: LockedPulseDecision(
+                    direction: PulseDirection.up,
+                    probabilityUp: .63,
+                    lockedAt: DateTime.utc(2026, 8, 8, 12, 1),
+                  ),
+                  calibrationProgress: 1,
+                  ensemble: ensemble,
+                  rawProbabilityUp: .61,
+                  statisticalQuality: .35,
+                  knowledgeMultiplier: .82,
+                  auditPassed: true,
+                ),
                 const AnalystDistributionPanel(ensemble: ensemble),
+                const AnalystTeamsPanel(ensemble: ensemble),
                 MarketChartPanel(
                   candles: candles,
                   currentPrice: 67000,
@@ -91,5 +114,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('NEXORA'), findsOneWidget);
+    expect(find.text('ALTA ↑'), findsOneWidget);
+    expect(find.text('68 (68%)'), findsNWidgets(2));
+    expect(find.textContaining('Tendencia'), findsOneWidget);
   });
 }

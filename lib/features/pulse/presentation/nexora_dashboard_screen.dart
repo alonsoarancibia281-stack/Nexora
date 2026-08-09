@@ -542,19 +542,33 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
     final stabilityShrink =
         (1 - signal.instabilityScore / 165).clamp(.40, 1.0).toDouble();
     probability = .5 + (probability - .5) * stabilityShrink;
+    final knowledgeMultiplier = _knowledgeMultiplierFor(
+      signal: signal,
+      calibrated: calibrated,
+      statistical: statistical,
+      ensemble: ensemble,
+    );
+    probability = .5 + (probability - .5) * math.sqrt(knowledgeMultiplier);
+    return probability.clamp(.08, .92).toDouble();
+  }
+
+  double _knowledgeMultiplierFor({
+    required PulseSignal signal,
+    required PulseProbabilityResult? calibrated,
+    required PulseStatisticalResult? statistical,
+    required PulseEnsemble100Result? ensemble,
+  }) {
     final metrics = _metrics;
     final observedAdvantage = metrics.samples < 30
         ? .5
         : (.5 + (metrics.accuracy - .5) * 5).clamp(0.0, 1.0).toDouble();
-    final knowledgeMultiplier = _knowledge.confidenceMultiplier(
+    return _knowledge.confidenceMultiplier(
       instability: signal.instabilityScore / 100,
       analystAgreement: ensemble?.agreement ?? 0,
       statisticalEdge: calibrated?.statisticalEdge ?? 0,
       baselineAdvantage: observedAdvantage,
       robustness: statistical?.signalQuality ?? 0,
     );
-    probability = .5 + (probability - .5) * math.sqrt(knowledgeMultiplier);
-    return probability.clamp(.08, .92).toDouble();
   }
 
   int _directionalVotes(
@@ -607,6 +621,17 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
       ((300 - _remainingSeconds) / _decisionGate.minimumCalibrationSeconds)
           .clamp(0.0, 1.0)
           .toDouble();
+
+  double get _currentKnowledgeMultiplier {
+    final signal = _signal;
+    if (signal == null) return 1;
+    return _knowledgeMultiplierFor(
+      signal: signal,
+      calibrated: _mathPrediction,
+      statistical: _statPrediction,
+      ensemble: _ensemblePrediction,
+    );
+  }
 
   BreakoutView get _breakout {
     final start = _roundStart;
@@ -833,11 +858,8 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
               const gap = 10.0;
               const horizontalPadding = 10.0;
               final available = constraints.maxWidth - horizontalPadding * 2;
-              final columns = available >= 1180
-                  ? 3
-                  : available >= 700
-                      ? 2
-                      : 1;
+              final desktop = available >= 1180;
+              final columns = available >= 700 ? 2 : 1;
               final columnWidth = (available - gap * (columns - 1)) / columns;
               double widthFor(int desiredSpan) {
                 final span = math.min(desiredSpan, columns);
@@ -845,6 +867,136 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
               }
 
               final breakout = _breakout;
+              final predictionPanel = PredictionPanel(
+                decision: _lockedDecision,
+                calibrationProgress: _calibrationProgress,
+                ensemble: _ensemblePrediction,
+                rawProbabilityUp: _rawProbabilityUp,
+                statisticalQuality: _statPrediction?.signalQuality ?? 0,
+                knowledgeMultiplier: _currentKnowledgeMultiplier,
+                auditPassed: _historicalAuditPassed,
+              );
+              final distributionPanel = AnalystDistributionPanel(
+                ensemble: _ensemblePrediction,
+              );
+              final teamsPanel = AnalystTeamsPanel(
+                ensemble: _ensemblePrediction,
+              );
+              final knowledgePanel = KnowledgePanel(
+                entries: _knowledgeEntries,
+              );
+              final chartPanel = MarketChartPanel(
+                candles: _candles5m,
+                currentPrice: _currentPrice,
+                boxHigh: breakout.boxHigh,
+                boxLow: breakout.boxLow,
+              );
+              final microstructurePanel = MicrostructurePanel(
+                book: _book,
+                trades: _trades,
+              );
+              final qualityPanel = QualityPanel(
+                metrics: _metrics,
+                statisticalQuality: _statPrediction?.signalQuality ?? 0,
+              );
+              final biasPanel = AuditPanel(
+                title: 'Detector de sesgos · Kahneman',
+                entries: _biasEntries,
+              );
+              final breakoutPanel = BreakoutPanel(breakout: breakout);
+              final evolutionPanel = ProbabilityEvolutionPanel(
+                samples: _probabilityTrail,
+              );
+              final performancePanel = AggregatePerformancePanel(
+                metrics: _metrics,
+              );
+              final historyPanel = RoundHistoryPanel(outcomes: _outcomes);
+
+              Widget desktopColumn(List<Widget> children) => Column(
+                    children: [
+                      for (var index = 0; index < children.length; index++) ...[
+                        if (index > 0) const SizedBox(height: gap),
+                        children[index],
+                      ],
+                    ],
+                  );
+
+              final overview = desktop
+                  ? Column(
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              flex: 22,
+                              child: desktopColumn([
+                                predictionPanel,
+                                qualityPanel,
+                              ]),
+                            ),
+                            const SizedBox(width: gap),
+                            Expanded(
+                              flex: 24,
+                              child: desktopColumn([
+                                distributionPanel,
+                                teamsPanel,
+                                performancePanel,
+                              ]),
+                            ),
+                            const SizedBox(width: gap),
+                            Expanded(
+                              flex: 24,
+                              child: desktopColumn([
+                                knowledgePanel,
+                                biasPanel,
+                                breakoutPanel,
+                              ]),
+                            ),
+                            const SizedBox(width: gap),
+                            Expanded(
+                              flex: 30,
+                              child: desktopColumn([
+                                chartPanel,
+                                microstructurePanel,
+                              ]),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: gap),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 5, child: evolutionPanel),
+                            const SizedBox(width: gap),
+                            Expanded(flex: 4, child: historyPanel),
+                          ],
+                        ),
+                      ],
+                    )
+                  : Wrap(
+                      spacing: gap,
+                      runSpacing: gap,
+                      children: [
+                        SizedBox(width: widthFor(1), child: predictionPanel),
+                        SizedBox(width: widthFor(1), child: distributionPanel),
+                        SizedBox(width: widthFor(1), child: teamsPanel),
+                        SizedBox(width: widthFor(1), child: knowledgePanel),
+                        SizedBox(width: widthFor(columns), child: chartPanel),
+                        SizedBox(
+                          width: widthFor(1),
+                          child: microstructurePanel,
+                        ),
+                        SizedBox(width: widthFor(1), child: qualityPanel),
+                        SizedBox(width: widthFor(1), child: biasPanel),
+                        SizedBox(width: widthFor(1), child: breakoutPanel),
+                        SizedBox(
+                          width: widthFor(columns),
+                          child: evolutionPanel,
+                        ),
+                        SizedBox(width: widthFor(1), child: performancePanel),
+                        SizedBox(width: widthFor(columns), child: historyPanel),
+                      ],
+                    );
               return RefreshIndicator(
                 onRefresh: () => _load(),
                 child: ListView(
@@ -881,80 +1033,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
                       ),
                     ],
                     const SizedBox(height: gap),
-                    Wrap(
-                      spacing: gap,
-                      runSpacing: gap,
-                      children: [
-                        SizedBox(
-                          width: widthFor(1),
-                          child: PredictionPanel(
-                            decision: _lockedDecision,
-                            calibrationProgress: _calibrationProgress,
-                            agreement: _ensemblePrediction?.agreement ?? 0,
-                            auditPassed: _historicalAuditPassed,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: AnalystDistributionPanel(
-                            ensemble: _ensemblePrediction,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: KnowledgePanel(entries: _knowledgeEntries),
-                        ),
-                        SizedBox(
-                          width: widthFor(columns >= 2 ? 2 : 1),
-                          child: MarketChartPanel(
-                            candles: _candles5m,
-                            currentPrice: _currentPrice,
-                            boxHigh: breakout.boxHigh,
-                            boxLow: breakout.boxLow,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: MicrostructurePanel(
-                            book: _book,
-                            trades: _trades,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: QualityPanel(
-                            metrics: _metrics,
-                            statisticalQuality:
-                                _statPrediction?.signalQuality ?? 0,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: AuditPanel(
-                            title: 'Detector de sesgos · Kahneman',
-                            entries: _biasEntries,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: BreakoutPanel(breakout: breakout),
-                        ),
-                        SizedBox(
-                          width: widthFor(columns >= 2 ? 2 : 1),
-                          child: ProbabilityEvolutionPanel(
-                            samples: _probabilityTrail,
-                          ),
-                        ),
-                        SizedBox(
-                          width: widthFor(1),
-                          child: AggregatePerformancePanel(metrics: _metrics),
-                        ),
-                        SizedBox(
-                          width: widthFor(columns >= 2 ? 2 : 1),
-                          child: RoundHistoryPanel(outcomes: _outcomes),
-                        ),
-                      ],
-                    ),
+                    overview,
                     const SizedBox(height: 14),
                     const Text(
                       'Nexora es un sistema experimental de análisis probabilístico. No garantiza resultados, no custodia fondos y no ejecuta operaciones.',

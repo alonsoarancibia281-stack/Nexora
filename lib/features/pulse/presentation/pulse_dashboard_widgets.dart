@@ -279,18 +279,25 @@ class PredictionPanel extends StatelessWidget {
     super.key,
     required this.decision,
     required this.calibrationProgress,
-    required this.agreement,
+    required this.ensemble,
+    required this.rawProbabilityUp,
+    required this.statisticalQuality,
+    required this.knowledgeMultiplier,
     required this.auditPassed,
   });
 
   final LockedPulseDecision? decision;
   final double calibrationProgress;
-  final double agreement;
+  final PulseEnsemble100Result? ensemble;
+  final double rawProbabilityUp;
+  final double statisticalQuality;
+  final double knowledgeMultiplier;
   final bool auditPassed;
 
   @override
   Widget build(BuildContext context) {
     final direction = decision?.direction;
+    final calibrating = decision == null && calibrationProgress < 1;
     final color = direction == PulseDirection.up
         ? nexoraGreen
         : direction == PulseDirection.down
@@ -300,12 +307,17 @@ class PredictionPanel extends StatelessWidget {
         ? 'ALTA ↑'
         : direction == PulseDirection.down
             ? 'BAJA ↓'
-            : 'CALIBRANDO';
+            : calibrating
+                ? 'CALIBRANDO'
+                : 'SIN SEÑAL';
+    final up = ensemble?.upAnalysts ?? 0;
+    final down = ensemble?.downAnalysts ?? 0;
+    final neutral = ensemble?.neutralAnalysts ?? 100;
+    final agreement = ensemble?.agreement ?? 0;
+    final displayedProbability = decision?.confidence;
     return NexoraPanel(
       title: 'Predicción Nexora',
-      subtitle: decision == null
-          ? 'Se emitirá solo con evidencia suficiente'
-          : 'Señal bloqueada hasta el cierre de la ronda',
+      subtitle: 'Resultado agregado con filtros y controles reales',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -322,43 +334,100 @@ class PredictionPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            decision == null
-                ? '${(calibrationProgress * 100).toStringAsFixed(0)}%'
-                : '${decision!.confidence.toStringAsFixed(1)}%',
+            displayedProbability == null
+                ? calibrating
+                    ? '${(calibrationProgress * 100).toStringAsFixed(0)}%'
+                    : '—'
+                : '${displayedProbability.toStringAsFixed(1)}%',
             style: TextStyle(
               color: color,
               fontSize: 42,
               fontWeight: FontWeight.w700,
             ),
           ),
+          Text(
+            displayedProbability == null
+                ? calibrating
+                    ? 'calibración completada'
+                    : 'evidencia insuficiente para publicar dirección'
+                : 'probabilidad final calibrada y bloqueada',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: nexoraMuted, fontSize: 10),
+          ),
           const SizedBox(height: 8),
           LinearProgressIndicator(
-            value: decision == null
+            value: displayedProbability == null
                 ? calibrationProgress
-                : decision!.confidence / 100,
+                : displayedProbability / 100,
             color: color,
+            backgroundColor: const Color(0xFF26333D),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 3),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('0%', style: TextStyle(color: nexoraMuted, fontSize: 8)),
+                Text('25%', style: TextStyle(color: nexoraMuted, fontSize: 8)),
+                Text('50%', style: TextStyle(color: nexoraMuted, fontSize: 8)),
+                Text('75%', style: TextStyle(color: nexoraMuted, fontSize: 8)),
+                Text('100%', style: TextStyle(color: nexoraMuted, fontSize: 8)),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: _StatBox(
-                  label: 'ACUERDO',
-                  value: '${(agreement * 100).toStringAsFixed(0)}%',
-                  color: agreement >= .58 ? nexoraGreen : nexoraAmber,
+                  label: 'ALTA',
+                  value: '$up ($up%)',
+                  color: nexoraGreen,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Expanded(
                 child: _StatBox(
-                  label: 'AUDITORÍA',
-                  value: auditPassed ? 'APROBADA' : 'SIN VENTAJA',
-                  color: auditPassed ? nexoraGreen : nexoraRed,
+                  label: 'BAJA',
+                  value: '$down ($down%)',
+                  color: nexoraRed,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _StatBox(
+                  label: 'INCIERTO',
+                  value: '$neutral ($neutral%)',
+                  color: nexoraAmber,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const Divider(height: 20),
+          NexoraMetricRow(
+            label: 'Consenso bruto',
+            value: '${(agreement * 100).toStringAsFixed(1)}%',
+            color: agreement >= .58 ? nexoraGreen : nexoraAmber,
+          ),
+          NexoraMetricRow(
+            label: 'Probabilidad antes del bloqueo',
+            value: '${(rawProbabilityUp * 100).toStringAsFixed(1)}% ALTA',
+          ),
+          NexoraMetricRow(
+            label: 'Calidad estadística',
+            value: '${(statisticalQuality * 100).toStringAsFixed(1)}%',
+            color: statisticalQuality >= .12 ? nexoraGreen : nexoraAmber,
+          ),
+          NexoraMetricRow(
+            label: 'Multiplicador de conocimiento',
+            value: 'x${knowledgeMultiplier.toStringAsFixed(2)}',
+          ),
+          NexoraMetricRow(
+            label: 'Auditoría histórica',
+            value: auditPassed ? 'HABILITADA' : 'VETO ACTIVO',
+            color: auditPassed ? nexoraGreen : nexoraRed,
+          ),
+          const SizedBox(height: 8),
           const Text(
             'La dirección publicada no cambia dentro de la misma ronda. Si la evidencia es débil, Nexora se abstiene.',
             textAlign: TextAlign.center,
@@ -423,16 +492,65 @@ class AnalystDistributionPanel extends StatelessWidget {
                 ),
                 const Divider(height: 20),
                 NexoraMetricRow(
-                  label: 'Fuerza consenso',
+                  label: 'Nivel de acuerdo',
                   value: ensemble == null
                       ? '—'
                       : ensemble!.agreement.toStringAsFixed(2),
+                ),
+                NexoraMetricRow(
+                  label: 'Dispersión',
+                  value: ensemble == null
+                      ? '—'
+                      : (1 - ensemble!.agreement).toStringAsFixed(2),
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class AnalystTeamsPanel extends StatelessWidget {
+  const AnalystTeamsPanel({super.key, required this.ensemble});
+
+  final PulseEnsemble100Result? ensemble;
+
+  @override
+  Widget build(BuildContext context) {
+    final teams = ensemble?.teamOpinions ?? const <TeamOpinion>[];
+    return NexoraPanel(
+      title: 'Equipos de analistas · 10 × 10',
+      subtitle: 'Probabilidad y calidad calculadas por familia',
+      child: teams.isEmpty
+          ? const Text(
+              'Recopilando datos suficientes para activar los 100 analistas.',
+              style: TextStyle(color: nexoraMuted, fontSize: 10),
+            )
+          : Column(
+              children: teams.map((team) {
+                final edge = team.probabilityUp - .5;
+                final directional = edge.abs() >= .02;
+                final up = edge >= 0;
+                final color = !directional
+                    ? nexoraAmber
+                    : up
+                        ? nexoraGreen
+                        : nexoraRed;
+                final direction = !directional
+                    ? 'NEUTRO'
+                    : up
+                        ? 'ALTA'
+                        : 'BAJA';
+                return NexoraMetricRow(
+                  label: _analystFamilyLabel(team.family),
+                  value:
+                      '$direction ${(team.probabilityUp * 100).toStringAsFixed(1)}%  ·  Q ${(team.quality * 100).toStringAsFixed(0)}%',
+                  color: color,
+                );
+              }).toList(growable: false),
+            ),
     );
   }
 }
@@ -1268,6 +1386,19 @@ PulseRoundObservation? _representativeObservation(PulseRoundOutcome outcome) {
             : b,
   );
 }
+
+String _analystFamilyLabel(AnalystFamily family) => switch (family) {
+      AnalystFamily.momentum => 'Momentum',
+      AnalystFamily.trend => 'Tendencia',
+      AnalystFamily.volatility => 'Volatilidad',
+      AnalystFamily.meanReversion => 'Reversión a la media',
+      AnalystFamily.orderBook => 'Libro de órdenes',
+      AnalystFamily.tradeFlow => 'Flujo agresor',
+      AnalystFamily.volume => 'Volumen',
+      AnalystFamily.priceAction => 'Acción del precio',
+      AnalystFamily.intermarket => 'Confirmación BTC/ETH',
+      AnalystFamily.regime => 'Régimen',
+    };
 
 String _price(double value) {
   final fixed = value.toStringAsFixed(2);
