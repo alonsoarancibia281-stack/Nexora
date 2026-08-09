@@ -140,6 +140,8 @@ class NexoraDashboardHeader extends StatelessWidget {
     required this.roundNumber,
     required this.loading,
     required this.onBack,
+    this.brandTitle = 'NEXORA',
+    this.brandSubtitle = 'META-MOTOR DE 100 ANALISTAS',
     this.symbolLabel = 'BTC/USDT',
     this.sourceLabel = 'BINANCE REAL',
   });
@@ -150,6 +152,8 @@ class NexoraDashboardHeader extends StatelessWidget {
   final int roundNumber;
   final bool loading;
   final VoidCallback? onBack;
+  final String brandTitle;
+  final String brandSubtitle;
   final String symbolLabel;
   final String sourceLabel;
 
@@ -177,20 +181,20 @@ class NexoraDashboardHeader extends StatelessWidget {
                   icon: const Icon(Icons.arrow_back, size: 19),
                   visualDensity: VisualDensity.compact,
                 ),
-              const Column(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'NEXORA',
-                    style: TextStyle(
+                    brandTitle,
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 3,
                     ),
                   ),
                   Text(
-                    'META-MOTOR DE 100 ANALISTAS',
-                    style: TextStyle(color: nexoraMuted, fontSize: 9),
+                    brandSubtitle,
+                    style: const TextStyle(color: nexoraMuted, fontSize: 9),
                   ),
                 ],
               ),

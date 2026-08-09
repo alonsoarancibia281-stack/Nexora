@@ -668,22 +668,6 @@ class _NexoraFuturesDashboardScreenState
   int get _roundNumber =>
       ((_roundStart?.millisecondsSinceEpoch ?? 0) ~/ 300000) % 100000;
 
-  double get _calibrationProgress =>
-      ((300 - _remainingSeconds) / _decisionGate.minimumCalibrationSeconds)
-          .clamp(0.0, 1.0)
-          .toDouble();
-
-  double get _currentKnowledgeMultiplier {
-    final signal = _signal;
-    if (signal == null) return 1;
-    return _knowledgeMultiplierFor(
-      signal: signal,
-      calibrated: _mathPrediction,
-      statistical: _statPrediction,
-      ensemble: _ensemblePrediction,
-    );
-  }
-
   BreakoutView get _breakout {
     final start = _roundStart;
     final completed = start == null
@@ -918,15 +902,6 @@ class _NexoraFuturesDashboardScreenState
               }
 
               final breakout = _breakout;
-              final predictionPanel = PredictionPanel(
-                decision: _lockedDecision,
-                calibrationProgress: _calibrationProgress,
-                ensemble: _ensemblePrediction,
-                rawProbabilityUp: _rawProbabilityUp,
-                statisticalQuality: _statPrediction?.signalQuality ?? 0,
-                knowledgeMultiplier: _currentKnowledgeMultiplier,
-                auditPassed: _historicalAuditPassed,
-              );
               final distributionPanel = AnalystDistributionPanel(
                 ensemble: _ensemblePrediction,
               );
@@ -960,13 +935,6 @@ class _NexoraFuturesDashboardScreenState
                 entries: _biasEntries,
               );
               final breakoutPanel = BreakoutPanel(breakout: breakout);
-              final evolutionPanel = ProbabilityEvolutionPanel(
-                samples: _probabilityTrail,
-              );
-              final performancePanel = AggregatePerformancePanel(
-                metrics: _metrics,
-              );
-              final historyPanel = RoundHistoryPanel(outcomes: _outcomes);
 
               Widget desktopColumn(List<Widget> children) => Column(
                     children: [
@@ -986,7 +954,6 @@ class _NexoraFuturesDashboardScreenState
                             Expanded(
                               flex: 22,
                               child: desktopColumn([
-                                predictionPanel,
                                 futuresPlanPanel,
                                 qualityPanel,
                               ]),
@@ -997,7 +964,6 @@ class _NexoraFuturesDashboardScreenState
                               child: desktopColumn([
                                 distributionPanel,
                                 teamsPanel,
-                                performancePanel,
                               ]),
                             ),
                             const SizedBox(width: gap),
@@ -1019,22 +985,12 @@ class _NexoraFuturesDashboardScreenState
                             ),
                           ],
                         ),
-                        const SizedBox(height: gap),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(flex: 5, child: evolutionPanel),
-                            const SizedBox(width: gap),
-                            Expanded(flex: 4, child: historyPanel),
-                          ],
-                        ),
                       ],
                     )
                   : Wrap(
                       spacing: gap,
                       runSpacing: gap,
                       children: [
-                        SizedBox(width: widthFor(1), child: predictionPanel),
                         SizedBox(width: widthFor(1), child: futuresPlanPanel),
                         SizedBox(width: widthFor(1), child: distributionPanel),
                         SizedBox(width: widthFor(1), child: teamsPanel),
@@ -1047,12 +1003,6 @@ class _NexoraFuturesDashboardScreenState
                         SizedBox(width: widthFor(1), child: qualityPanel),
                         SizedBox(width: widthFor(1), child: biasPanel),
                         SizedBox(width: widthFor(1), child: breakoutPanel),
-                        SizedBox(
-                          width: widthFor(columns),
-                          child: evolutionPanel,
-                        ),
-                        SizedBox(width: widthFor(1), child: performancePanel),
-                        SizedBox(width: widthFor(columns), child: historyPanel),
                       ],
                     );
               return RefreshIndicator(
@@ -1067,6 +1017,8 @@ class _NexoraFuturesDashboardScreenState
                       countdown: _countdown,
                       roundNumber: _roundNumber,
                       loading: _loading || _loadInFlight,
+                      brandTitle: 'NEXORA FUTURES',
+                      brandSubtitle: 'PLAN USDⓈ-M · POOL DE 100 ANALISTAS',
                       symbolLabel: 'BTCUSDT PERP.',
                       sourceLabel: 'BINANCE USDⓈ-M',
                       onBack: Navigator.of(context).canPop()
@@ -1096,7 +1048,7 @@ class _NexoraFuturesDashboardScreenState
                     overview,
                     const SizedBox(height: 14),
                     const Text(
-                      'Nexora es un sistema experimental de análisis probabilístico. No garantiza resultados, no custodia fondos y no ejecuta operaciones.',
+                      'Nexora Futures calcula planes experimentales de riesgo. No garantiza resultados, no custodia fondos y no ejecuta operaciones.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: nexoraMuted, fontSize: 10),
                     ),

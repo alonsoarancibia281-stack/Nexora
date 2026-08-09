@@ -146,4 +146,31 @@ void main() {
     expect(find.text('COMPRAR / LONG'), findsOneWidget);
     expect(find.text('22.33 USDT'), findsNWidgets(2));
   });
+
+  testWidgets('Futures usa una identidad distinta de Predicciones',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: NexoraDashboardHeader(
+            price: 65000,
+            change24h: .5,
+            countdown: '04:15',
+            roundNumber: 7,
+            loading: false,
+            onBack: null,
+            brandTitle: 'NEXORA FUTURES',
+            brandSubtitle: 'PLAN USDⓈ-M · POOL DE 100 ANALISTAS',
+            symbolLabel: 'BTCUSDT PERP.',
+            sourceLabel: 'BINANCE USDⓈ-M',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('NEXORA FUTURES'), findsOneWidget);
+    expect(find.text('BTCUSDT PERP.'), findsOneWidget);
+    expect(find.text('BINANCE USDⓈ-M'), findsOneWidget);
+    expect(find.text('PREDICCIÓN NEXORA'), findsNothing);
+  });
 }
