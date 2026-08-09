@@ -62,6 +62,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   List<ProbabilitySample> _probabilityTrail = [];
   bool _loading = true;
   bool _loadInFlight = false;
+  bool _clockSyncInFlight = false;
   bool _roundTransitionInFlight = false;
   String? _error;
   double? _startPrice;
@@ -89,7 +90,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   Future<void> _initialize() async {
     final outcomes = await _historyRepository.load();
     if (mounted) setState(() => _outcomes = outcomes);
-    await _syncBinanceClock();
     await _startCurrentRound();
 
     _clock = Timer.periodic(const Duration(milliseconds: 250), (_) {
@@ -112,6 +112,8 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   }
 
   Future<void> _syncBinanceClock() async {
+    if (_clockSyncInFlight) return;
+    _clockSyncInFlight = true;
     try {
       final before = DateTime.now().toUtc();
       final serverTime = await _service.loadServerTime();
@@ -131,6 +133,8 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
       if (mounted) setState(() {});
     } catch (_) {
       // Keep the last valid exchange clock offset.
+    } finally {
+      _clockSyncInFlight = false;
     }
   }
 

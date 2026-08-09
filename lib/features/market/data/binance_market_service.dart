@@ -66,26 +66,83 @@ class AggTradeSnapshot {
 }
 
 class BinanceMarketService {
-  BinanceMarketService({http.Client? client})
-      : _client = client ?? http.Client();
+  BinanceMarketService({
+    http.Client? client,
+    List<Uri>? restBases,
+    List<Uri>? webSocketBases,
+    Duration requestTimeout = const Duration(seconds: 3),
+    Duration socketConnectTimeout = const Duration(seconds: 4),
+  })  : _client = client ?? http.Client(),
+        _restBases = List.unmodifiable(restBases ?? _defaultRestBases),
+        _webSocketBases =
+            List.unmodifiable(webSocketBases ?? _defaultWebSocketBases),
+        _requestTimeout = requestTimeout,
+        _socketConnectTimeout = socketConnectTimeout {
+    if (_restBases.isEmpty) {
+      throw ArgumentError.value(restBases, 'restBases', 'No puede estar vacío');
+    }
+    if (_webSocketBases.isEmpty) {
+      throw ArgumentError.value(
+        webSocketBases,
+        'webSocketBases',
+        'No puede estar vacío',
+      );
+    }
+  }
+
   final http.Client _client;
-  static const _rest = 'https://api.binance.com';
-  static const _ws = 'wss://stream.binance.com:9443/ws';
+  final List<Uri> _restBases;
+  final List<Uri> _webSocketBases;
+  final Duration _requestTimeout;
+  final Duration _socketConnectTimeout;
+  int _preferredRestIndex = 0;
+  int _preferredWebSocketIndex = 0;
+
+  static const _rest = 'https://data-api.binance.vision';
+  static final _defaultRestBases = <Uri>[
+    Uri.parse('https://data-api.binance.vision'),
+    Uri.parse('https://api.binance.com'),
+    Uri.parse('https://api-gcp.binance.com'),
+    Uri.parse('https://api1.binance.com'),
+  ];
+  static final _defaultWebSocketBases = <Uri>[
+    Uri.parse('wss://data-stream.binance.vision'),
+    Uri.parse('wss://stream.binance.com:443'),
+    Uri.parse('wss://stream.binance.com:9443'),
+  ];
   static const _marketCacheKey = 'nexora_market_cache_v1';
 
-  Future<http.Response> _getWithRetry(Uri uri, {int attempts = 3}) async {
+  List<int> _endpointOrder(int preferred, int length) => [
+        preferred.clamp(0, length - 1),
+        for (var index = 0; index < length; index++)
+          if (index != preferred) index,
+      ];
+
+  Uri _moveToBase(Uri request, Uri base) => request.replace(
+        scheme: base.scheme,
+        host: base.host,
+        port: base.hasPort ? base.port : null,
+      );
+
+  Future<http.Response> _getWithFailover(Uri request) async {
     Object? lastError;
-    for (var i = 0; i < attempts; i++) {
+    final order = _endpointOrder(_preferredRestIndex, _restBases.length);
+    for (final index in order) {
+      final uri = _moveToBase(request, _restBases[index]);
       try {
-        final response =
-            await _client.get(uri).timeout(const Duration(seconds: 10));
-        if (response.statusCode == 200) return response;
+        final response = await _client.get(uri).timeout(_requestTimeout);
+        if (response.statusCode == 200) {
+          _preferredRestIndex = index;
+          return response;
+        }
         lastError = Exception('HTTP ${response.statusCode}');
+        final clientError = response.statusCode >= 400 &&
+            response.statusCode < 500 &&
+            response.statusCode != 403 &&
+            response.statusCode != 408;
+        if (clientError) break;
       } catch (error) {
         lastError = error;
-      }
-      if (i < attempts - 1) {
-        await Future<void>.delayed(Duration(milliseconds: 500 * (i + 1)));
       }
     }
     throw Exception(
@@ -93,7 +150,7 @@ class BinanceMarketService {
   }
 
   Future<DateTime> loadServerTime() async {
-    final response = await _getWithRetry(Uri.parse('$_rest/api/v3/time'));
+    final response = await _getWithFailover(Uri.parse('$_rest/api/v3/time'));
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final millis = data['serverTime'];
     if (millis is! num)
@@ -116,7 +173,7 @@ class BinanceMarketService {
     final prefs = await SharedPreferences.getInstance();
     try {
       final response =
-          await _getWithRetry(Uri.parse('$_rest/api/v3/ticker/24hr'));
+          await _getWithFailover(Uri.parse('$_rest/api/v3/ticker/24hr'));
       await prefs.setString(_marketCacheKey, response.body);
       await prefs.setInt(
           '${_marketCacheKey}_at', DateTime.now().millisecondsSinceEpoch);
@@ -132,7 +189,7 @@ class BinanceMarketService {
     final uri = Uri.parse('$_rest/api/v3/ticker/24hr').replace(
       queryParameters: {'symbol': symbol.toUpperCase()},
     );
-    final response = await _getWithRetry(uri);
+    final response = await _getWithFailover(uri);
     return MarketAsset.fromTicker(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
@@ -151,7 +208,7 @@ class BinanceMarketService {
       'interval': interval,
       'limit': '$limit'
     });
-    final response = await _getWithRetry(uri);
+    final response = await _getWithFailover(uri);
     return (jsonDecode(response.body) as List<dynamic>)
         .map((e) => Candle.fromBinance(e as List<dynamic>))
         .toList();
@@ -173,7 +230,7 @@ class BinanceMarketService {
         'limit': '$limit',
       },
     );
-    final response = await _getWithRetry(uri);
+    final response = await _getWithFailover(uri);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     List<OrderBookLevel> parseSide(Object? raw) =>
         ((raw as List<dynamic>?) ?? const [])
@@ -223,7 +280,7 @@ class BinanceMarketService {
         'limit': '$safeLimit',
       },
     );
-    final response = await _getWithRetry(uri);
+    final response = await _getWithFailover(uri);
     final rows = (jsonDecode(response.body) as List<dynamic>)
         .cast<Map<String, dynamic>>();
     if (rows.isEmpty) {
@@ -309,26 +366,35 @@ class BinanceMarketService {
   }
 
   Stream<double> livePrice(String symbol) async* {
-    var retry = 0;
+    var failures = 0;
     while (true) {
-      WebSocketChannel? channel;
-      try {
-        final stream = '${symbol.toLowerCase()}@trade';
-        channel = WebSocketChannel.connect(Uri.parse('$_ws/$stream'));
-        await channel.ready.timeout(const Duration(seconds: 8));
-        retry = 0;
-        await for (final event in channel.stream) {
-          final data = jsonDecode(event as String) as Map<String, dynamic>;
-          final price = double.tryParse('${data['p']}');
-          if (price != null) yield price;
+      final order = _endpointOrder(
+        _preferredWebSocketIndex,
+        _webSocketBases.length,
+      );
+      for (final index in order) {
+        WebSocketChannel? channel;
+        try {
+          final stream = '${symbol.toLowerCase()}@trade';
+          final uri = _webSocketBases[index].replace(path: '/ws/$stream');
+          channel = WebSocketChannel.connect(uri);
+          await channel.ready.timeout(_socketConnectTimeout);
+          _preferredWebSocketIndex = index;
+          failures = 0;
+          await for (final event in channel.stream) {
+            final data = jsonDecode(event as String) as Map<String, dynamic>;
+            final price = double.tryParse('${data['p']}');
+            if (price != null) yield price;
+          }
+        } catch (_) {
+          failures++;
+        } finally {
+          await channel?.sink.close();
         }
-      } catch (_) {
-        retry++;
-        final seconds = retry.clamp(1, 8);
-        await Future<void>.delayed(Duration(seconds: seconds));
-      } finally {
-        await channel?.sink.close();
       }
+      final milliseconds =
+          (250 * (1 << failures.clamp(0, 4))).clamp(250, 3000).toInt();
+      await Future<void>.delayed(Duration(milliseconds: milliseconds));
     }
   }
 }
