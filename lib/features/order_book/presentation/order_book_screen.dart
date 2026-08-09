@@ -14,6 +14,8 @@ import '../domain/order_book_snapshot.dart';
 
 enum _BookSource { live, pasted }
 
+enum _TradeSide { buy, sell }
+
 class OrderBookScreen extends StatefulWidget {
   const OrderBookScreen({super.key});
 
@@ -24,11 +26,18 @@ class OrderBookScreen extends StatefulWidget {
 class _OrderBookScreenState extends State<OrderBookScreen> {
   final _symbol = TextEditingController(text: 'BTCUSDT');
   final _pasted = TextEditingController();
+  final _limitPrice = TextEditingController();
+  final _quantity = TextEditingController();
+  final _total = TextEditingController();
+  final _takeProfit = TextEditingController();
+  final _stopTrigger = TextEditingController();
+  final _stopLimit = TextEditingController();
   final _service = const BinanceOrderBookService();
   final _parser = const OrderBookParser();
   final _engine = const OrderBookPredictionEngine();
 
   _BookSource _source = _BookSource.live;
+  _TradeSide _side = _TradeSide.buy;
   late Stream<OrderBookSnapshot> _stream;
   StreamSubscription<Candle>? _candleSubscription;
   List<Candle> _candles = const [];
@@ -39,6 +48,10 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
   OrderBookSnapshot? _visibleSnapshot;
   OrderBookSnapshot? _pastedSnapshot;
   String? _pasteError;
+  bool _marginEnabled = true;
+  bool _tpSlEnabled = true;
+  bool _icebergEnabled = false;
+  double _amountFraction = 0;
 
   @override
   void initState() {
@@ -51,6 +64,12 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
     _candleSubscription?.cancel();
     _symbol.dispose();
     _pasted.dispose();
+    _limitPrice.dispose();
+    _quantity.dispose();
+    _total.dispose();
+    _takeProfit.dispose();
+    _stopTrigger.dispose();
+    _stopLimit.dispose();
     super.dispose();
   }
 
@@ -60,6 +79,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
     setState(() {
       _stream = _service.liveDepth(symbol);
       _visibleSnapshot = null;
+      _limitPrice.clear();
     });
     _connectCandles(symbol);
   }
@@ -153,12 +173,43 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
     );
   }
 
+  void _fillBbo(OrderBookSnapshot snapshot) {
+    final price = _side == _TradeSide.buy ? snapshot.bestBid : snapshot.bestAsk;
+    _limitPrice.text = _priceInput(price);
+    _recalculateTotal();
+  }
+
+  void _recalculateTotal() {
+    final price = double.tryParse(_limitPrice.text.replaceAll(',', ''));
+    final quantity = double.tryParse(_quantity.text.replaceAll(',', ''));
+    if (price == null || quantity == null || price <= 0 || quantity <= 0) {
+      return;
+    }
+    _total.text = (price * quantity).toStringAsFixed(2);
+  }
+
+  void _ensureInitialPrice(OrderBookSnapshot snapshot) {
+    if (_limitPrice.text.isNotEmpty) return;
+    final price = _side == _TradeSide.buy ? snapshot.bestBid : snapshot.bestAsk;
+    _limitPrice.text = _priceInput(price);
+  }
+
+  void _showManualExecutionNotice() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Orden preparada. Nexora no ejecuta operaciones automaticas.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => MainNavigationScaffold(
         currentIndex: 2,
         child: Scaffold(
           appBar: AppBar(
-            title: const Text('Flujo'),
+            title: const Text('Trade'),
             actions: [
               IconButton(
                 tooltip: 'Copiar snapshot',
@@ -168,34 +219,10 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
             ],
           ),
           body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
             children: [
-              const Text(
-                'Libro de ordenes',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Movimiento, velas y liquidez de corto plazo revisados por un pool de 100 analistas cuantitativos.',
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _symbol,
-                textCapitalization: TextCapitalization.characters,
-                onSubmitted: (_) => _connect(),
-                decoration: InputDecoration(
-                  labelText: 'Par de Binance',
-                  hintText: 'BTCUSDT',
-                  prefixIcon: const Icon(Icons.currency_bitcoin),
-                  suffixIcon: IconButton(
-                    tooltip: 'Conectar',
-                    onPressed: _connect,
-                    icon: const Icon(Icons.sync),
-                  ),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
+              _symbolBar(),
+              const SizedBox(height: 10),
               SegmentedButton<_BookSource>(
                 segments: const [
                   ButtonSegment(
@@ -206,7 +233,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
                   ButtonSegment(
                     value: _BookSource.pasted,
                     icon: Icon(Icons.content_paste),
-                    label: Text('Pegar datos'),
+                    label: Text('Pegar'),
                   ),
                 ],
                 selected: {_source},
@@ -218,12 +245,45 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
                   });
                 },
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               if (_source == _BookSource.live) _liveBook() else _pastePanel(),
             ],
           ),
         ),
       );
+
+  Widget _symbolBar() {
+    final change = _latestChange();
+    final color = change >= 0 ? const Color(0xFF16B980) : Colors.redAccent;
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _symbol,
+            textCapitalization: TextCapitalization.characters,
+            onSubmitted: (_) => _connect(),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              hintText: 'BTCUSDT',
+              suffixIcon: Icon(Icons.keyboard_arrow_down),
+            ),
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+          ),
+        ),
+        Text(
+          '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+          style: TextStyle(color: color, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Conectar',
+          onPressed: _connect,
+          icon: const Icon(Icons.sync),
+        ),
+      ],
+    );
+  }
 
   Widget _liveBook() => StreamBuilder<OrderBookSnapshot>(
         stream: _stream,
@@ -290,64 +350,430 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
             ),
           ],
           if (_pastedSnapshot case final snapshot?) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _snapshotView(snapshot, connected: false),
           ],
         ],
       );
 
   Widget _snapshotView(OrderBookSnapshot snapshot, {required bool connected}) {
+    _ensureInitialPrice(snapshot);
     final prediction = _engine.analyze(
       snapshot,
       candles: connected ? _candles : const [],
     );
     return Column(
       children: [
-        Row(
-          children: [
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: connected ? Colors.greenAccent : Colors.amberAccent,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                connected
-                    ? '${snapshot.symbol} · Binance en vivo'
-                    : '${snapshot.symbol} · Snapshot pegado',
-              ),
-            ),
-            Text(
-              _price(snapshot.midpoint),
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (connected) ...[
-          _liveChart(snapshot.symbol),
-          const SizedBox(height: 12),
-        ],
-        _predictionPanel(prediction),
-        const SizedBox(height: 12),
-        _OrderBookTable(snapshot: snapshot),
-        const SizedBox(height: 12),
+        _tradeTerminal(snapshot, prediction, connected: connected),
+        const SizedBox(height: 10),
+        if (connected) _chartPanel(snapshot.symbol),
+        const SizedBox(height: 10),
+        _analystDesk(prediction),
+        const SizedBox(height: 8),
         const Text(
-          'El libro puede cambiar en milisegundos y mostrar ordenes que luego se cancelan. Confirma con precio, volumen, tendencia y gestion del riesgo.',
+          'Senales educativas. El libro puede cambiar en milisegundos; confirma con riesgo, tendencia y liquidez antes de operar.',
           style: TextStyle(fontSize: 12),
         ),
       ],
     );
   }
 
-  Widget _liveChart(String symbol) {
+  Widget _tradeTerminal(
+    OrderBookSnapshot snapshot,
+    OrderBookPrediction prediction, {
+    required bool connected,
+  }) =>
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 430;
+          final form = _orderForm(snapshot, prediction);
+          final book = _LiveOrderBook(snapshot: snapshot);
+          if (compact) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 11, child: form),
+                const SizedBox(width: 10),
+                Expanded(flex: 8, child: book),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 340, child: form),
+              const SizedBox(width: 16),
+              Expanded(child: book),
+            ],
+          );
+        },
+      );
+
+  Widget _orderForm(
+      OrderBookSnapshot snapshot, OrderBookPrediction prediction) {
+    final isBuy = _side == _TradeSide.buy;
+    final actionColor =
+        isBuy ? const Color(0xFF28C48F) : const Color(0xFFFF5A75);
+    final available = isBuy ? '7.35110019 USDT' : '0.014820 BTC';
+    final max = isBuy ? '73.57722803 USDT' : '0.148200 BTC';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sideTabs(),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _pill('Aislado', selected: true)),
+            const SizedBox(width: 6),
+            Expanded(child: _pill('10x', selected: true)),
+            const SizedBox(width: 6),
+            Expanded(child: _pill('Prestamo', selected: false)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _orderTypeRow(),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _tradeInput(
+                controller: _limitPrice,
+                label: 'Limite(USDT)',
+                hint: 'Completar',
+                onChanged: (_) => _recalculateTotal(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 72,
+              height: 58,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF1F2F4),
+                  foregroundColor: Colors.black87,
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onPressed: () => _fillBbo(snapshot),
+                child: const Text(
+                  'BBO',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _tradeInput(
+          controller: _quantity,
+          label: 'Cantidad(BTC)',
+          hint: 'Completar',
+          onChanged: (_) => _recalculateTotal(),
+        ),
+        Slider(
+          value: _amountFraction,
+          divisions: 4,
+          label: '${(_amountFraction * 100).toStringAsFixed(0)}%',
+          onChanged: (value) => setState(() => _amountFraction = value),
+        ),
+        _tradeInput(
+          controller: _total,
+          label: 'Total(USDT)',
+          hint: 'Se calcula o se cambia',
+        ),
+        const SizedBox(height: 6),
+        _tpSlControls(),
+        const SizedBox(height: 8),
+        if (_tpSlEnabled) ...[
+          _tradeInput(
+            controller: _takeProfit,
+            label: 'Limit TP (USDT)',
+            hint: 'Take Profit',
+          ),
+          const SizedBox(height: 8),
+          _tradeInput(
+            controller: _stopTrigger,
+            label: 'Activador SL (USDT)',
+            hint: 'Stop Loss',
+          ),
+          const SizedBox(height: 8),
+          _tradeInput(
+            controller: _stopLimit,
+            label: 'SL Limit (USDT)',
+            hint: 'Stop Limit',
+          ),
+          const SizedBox(height: 6),
+        ],
+        _checkboxLine(
+          value: _icebergEnabled,
+          label: 'Iceberg',
+          onChanged: (value) => setState(() => _icebergEnabled = value),
+        ),
+        const SizedBox(height: 8),
+        _accountRow('Disponible', available),
+        _accountRow('Max.', max),
+        _accountRow('Prestamo', '-- USDT'),
+        _accountRow('Precio de liq.', '-- USDT'),
+        const SizedBox(height: 10),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: actionColor,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(56),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          onPressed: _showManualExecutionNotice,
+          child: Text(
+            isBuy ? 'Compra con margen' : 'Venta con margen',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _poolAction(prediction),
+      ],
+    );
+  }
+
+  Widget _sideTabs() => Row(
+        children: [
+          Expanded(
+            child: _sideButton(
+              label: 'Comprar',
+              side: _TradeSide.buy,
+              color: const Color(0xFF28C48F),
+            ),
+          ),
+          Expanded(
+            child: _sideButton(
+              label: 'Vender',
+              side: _TradeSide.sell,
+              color: const Color(0xFFFF5A75),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Text(
+                'Margin',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+              Switch(
+                value: _marginEnabled,
+                activeThumbColor: const Color(0xFFFFD400),
+                onChanged: (value) => setState(() => _marginEnabled = value),
+              ),
+            ],
+          ),
+        ],
+      );
+
+  Widget _sideButton({
+    required String label,
+    required _TradeSide side,
+    required Color color,
+  }) {
+    final selected = _side == side;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => setState(() {
+        _side = side;
+        _limitPrice.clear();
+      }),
+      child: Container(
+        height: 38,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? color : const Color(0xFFF7F7F7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : Colors.black54,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _pill(String label, {required bool selected}) => Container(
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFF1F2F4) : const Color(0xFFFAFAFA),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+      );
+
+  Widget _orderTypeRow() => Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F2F4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Limit Order',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            Icon(Icons.info_outline, size: 18, color: Colors.black45),
+            SizedBox(width: 10),
+            Icon(Icons.keyboard_arrow_down, color: Colors.black45),
+          ],
+        ),
+      );
+
+  Widget _tradeInput({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    ValueChanged<String>? onChanged,
+  }) =>
+      SizedBox(
+        height: 58,
+        child: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: onChanged,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            isDense: true,
+            filled: true,
+            fillColor: const Color(0xFFF3F4F6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+          ),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      );
+
+  Widget _tpSlControls() => Row(
+        children: [
+          Expanded(
+            child: _checkboxLine(
+              value: _tpSlEnabled,
+              label: 'TP/SL',
+              onChanged: (value) => setState(() => _tpSlEnabled = value),
+            ),
+          ),
+          if (_tpSlEnabled)
+            const Row(
+              children: [
+                Text('Avanzado', style: TextStyle(fontSize: 13)),
+                Icon(Icons.keyboard_arrow_down, size: 20),
+              ],
+            ),
+        ],
+      );
+
+  Widget _checkboxLine({
+    required bool value,
+    required String label,
+    required ValueChanged<bool> onChanged,
+  }) =>
+      InkWell(
+        onTap: () => onChanged(!value),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: value,
+              visualDensity: VisualDensity.compact,
+              onChanged: (next) => onChanged(next ?? false),
+            ),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _accountRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.black54, fontSize: 13),
+              ),
+            ),
+            Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+
+  Widget _poolAction(OrderBookPrediction prediction) {
+    final color = switch (prediction.bias) {
+      OrderBookBias.bullish => const Color(0xFF16B980),
+      OrderBookBias.bearish => const Color(0xFFFF4E6A),
+      OrderBookBias.neutral => const Color(0xFFB58200),
+    };
+    final decision = switch (prediction.bias) {
+      OrderBookBias.bullish => 'COMPRA',
+      OrderBookBias.bearish => 'VENTA',
+      OrderBookBias.neutral => 'ESPERAR',
+    };
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Pool 100',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+          Text(
+            decision,
+            style: TextStyle(
+              color: color,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            '${prediction.confidence.toStringAsFixed(0)}% confianza · ${(prediction.agreement * 100).toStringAsFixed(0)}% acuerdo',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chartPanel(String symbol) {
     if (_candlesLoading && _candles.isEmpty) {
       return const SizedBox(
-        height: 300,
+        height: 88,
         child: Center(child: CircularProgressIndicator()),
       );
     }
@@ -362,196 +788,325 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
         ? _candles
         : _candles.sublist(_candles.length - 40);
     final latest = visible.last;
-    final change = latest.open == 0
-        ? 0.0
-        : (latest.close - latest.open) / latest.open * 100;
-    final candleColor = change >= 0 ? Colors.greenAccent : Colors.redAccent;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Grafico $symbol',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Text(
-                  '${change >= 0 ? '+' : ''}${change.toStringAsFixed(3)}%',
-                  style: TextStyle(
-                      color: candleColor, fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              children: ['1m', '5m', '15m']
-                  .map(
-                    (interval) => ChoiceChip(
-                      label: Text(interval),
-                      selected: _interval == interval,
-                      onSelected: (_) {
-                        setState(() => _interval = interval);
-                        _connectCandles(_symbol.text.trim().toUpperCase());
-                      },
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 8),
-            CandlestickChart(candles: visible),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                    child:
-                        _CandleMetric(label: 'Apertura', value: latest.open)),
-                Expanded(
-                    child: _CandleMetric(label: 'Maximo', value: latest.high)),
-                Expanded(
-                    child: _CandleMetric(label: 'Minimo', value: latest.low)),
-                Expanded(
-                    child: _CandleMetric(label: 'Cierre', value: latest.close)),
-              ],
-            ),
-            const Divider(height: 24),
-            const ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              childrenPadding: EdgeInsets.only(bottom: 8),
-              leading: Icon(Icons.school_outlined),
-              title: Text('Como leer estas velas'),
-              children: [
-                _GuideLine(
-                  title: 'Cuerpo',
-                  text:
-                      'Muestra la distancia entre apertura y cierre; verde indica cierre superior y rojo cierre inferior.',
-                ),
-                _GuideLine(
-                  title: 'Mechas',
-                  text:
-                      'Marcan maximo y minimo. Una mecha larga puede mostrar rechazo, pero necesita confirmacion posterior.',
-                ),
-                _GuideLine(
-                  title: 'Contexto',
-                  text:
-                      'El pool combina la forma de la vela con tendencia, momentum, volumen, volatilidad y libro de ordenes.',
-                ),
-              ],
-            ),
-          ],
+      margin: EdgeInsets.zero,
+      child: ExpansionTile(
+        initiallyExpanded: false,
+        title: Text(
+          'Grafico ${_displaySymbol(symbol)}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        children: [
+          Wrap(
+            spacing: 6,
+            children: ['1m', '5m', '15m']
+                .map(
+                  (interval) => ChoiceChip(
+                    label: Text(interval),
+                    selected: _interval == interval,
+                    onSelected: (_) {
+                      setState(() => _interval = interval);
+                      _connectCandles(_symbol.text.trim().toUpperCase());
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 8),
+          CandlestickChart(candles: visible),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                  child: _CandleMetric(label: 'Apertura', value: latest.open)),
+              Expanded(
+                  child: _CandleMetric(label: 'Maximo', value: latest.high)),
+              Expanded(
+                  child: _CandleMetric(label: 'Minimo', value: latest.low)),
+              Expanded(
+                  child: _CandleMetric(label: 'Cierre', value: latest.close)),
+            ],
+          ),
+          const Divider(height: 24),
+          const _GuideLine(
+            title: 'Cuerpo',
+            text:
+                'Apertura contra cierre. Verde cierra arriba; rojo cierra abajo.',
+          ),
+          const _GuideLine(
+            title: 'Mechas',
+            text:
+                'Maximo y minimo. Mechas largas muestran rechazo, no certeza.',
+          ),
+          const _GuideLine(
+            title: 'Contexto',
+            text:
+                'El pool cruza vela, momentum, volumen, volatilidad y liquidez.',
+          ),
+        ],
       ),
     );
   }
 
-  Widget _predictionPanel(OrderBookPrediction prediction) {
-    final color = switch (prediction.bias) {
-      OrderBookBias.bullish => Colors.greenAccent,
-      OrderBookBias.bearish => Colors.redAccent,
-      OrderBookBias.neutral => Colors.amberAccent,
-    };
-    final decision = switch (prediction.bias) {
-      OrderBookBias.bullish => 'COMPRA',
-      OrderBookBias.bearish => 'VENTA',
-      OrderBookBias.neutral => 'ESPERAR',
-    };
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('DECISION DEL POOL'),
-                      Text(
-                        decision,
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(prediction.summary),
-                    ],
-                  ),
-                ),
-                Text(
-                  '${prediction.score >= 0 ? '+' : ''}${prediction.score.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Probabilidad alcista ${prediction.upProbability.toStringAsFixed(0)}% · bajista ${prediction.downProbability.toStringAsFixed(0)}%',
-            ),
-            Text(
-              'Confianza del pool ${prediction.confidence.toStringAsFixed(0)}%',
-            ),
-            Text(
-              '${prediction.activeAnalysts} analistas cuantitativos · ${(prediction.agreement * 100).toStringAsFixed(0)}% de acuerdo',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const Text('50 revisan liquidez · 50 revisan velas e indicadores'),
-            const Divider(height: 24),
-            ...prediction.reasons.map(
-              (reason) => Padding(
-                padding: const EdgeInsets.only(bottom: 5),
+  Widget _analystDesk(OrderBookPrediction prediction) => ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+        title: const Text(
+          'Analistas del pool',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: Text(prediction.summary),
+        children: [
+          ...prediction.reasons.map(
+            (reason) => Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Text(reason),
               ),
             ),
-            const Divider(height: 24),
-            const Text(
-              'Mesa de analistas',
-              style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const Divider(),
+          ...prediction.teamOpinions.map(
+            (team) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${team.family.label}: ${team.task}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Text(
+                    '${(team.probabilityUp * 100).toStringAsFixed(0)}% alta',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            ...prediction.teamOpinions.map(
-              (team) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(team.family.label),
-                          Text(
-                            team.task,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      '${(team.probabilityUp * 100).toStringAsFixed(0)}% alta',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
+          ),
+        ],
+      );
+
+  double _latestChange() {
+    if (_candles.isEmpty) return 0;
+    final latest = _candles.last;
+    if (latest.open == 0) return 0;
+    return (latest.close - latest.open) / latest.open * 100;
+  }
+
+  String _displaySymbol(String symbol) {
+    final normalized = symbol.toUpperCase();
+    if (normalized.endsWith('USDT')) {
+      return '${normalized.substring(0, normalized.length - 4)}/USDT';
+    }
+    return normalized;
+  }
+
+  String _priceInput(double value) =>
+      value >= 1000 ? value.toStringAsFixed(2) : value.toStringAsPrecision(7);
+}
+
+class _LiveOrderBook extends StatelessWidget {
+  const _LiveOrderBook({required this.snapshot});
+
+  final OrderBookSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final asks = snapshot.asks.take(12).toList();
+    final bids = snapshot.bids.take(12).toList();
+    final totalAsk = asks.fold<double>(0, (sum, level) => sum + level.quantity);
+    final totalBid = bids.fold<double>(0, (sum, level) => sum + level.quantity);
+    final totalDepth = totalAsk + totalBid;
+    final bidRatio = totalDepth == 0 ? 0.5 : totalBid / totalDepth;
+    final askRatio = 1 - bidRatio;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Precio\n(USDT)',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                'Monto\n(BTC)',
+                textAlign: TextAlign.end,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
               ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 6),
+        ...asks.reversed.map(
+          (level) => _BookLevelRow(
+            level: level,
+            color: const Color(0xFFFF4E6A),
+            maxQuantity: totalAsk,
+            alignRight: true,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              Text(
+                snapshot.midpoint >= 1000
+                    ? snapshot.midpoint.toStringAsFixed(2)
+                    : snapshot.midpoint.toStringAsPrecision(7),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFFFF4E6A),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                'Spread ${_spread(snapshot)}',
+                style: const TextStyle(fontSize: 11, color: Colors.black45),
+              ),
+            ],
+          ),
+        ),
+        ...bids.map(
+          (level) => _BookLevelRow(
+            level: level,
+            color: const Color(0xFF16B980),
+            maxQuantity: totalBid,
+            alignRight: false,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Text(
+              '${(bidRatio * 100).toStringAsFixed(2)}%',
+              style: const TextStyle(color: Color(0xFF16B980), fontSize: 12),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: SizedBox(
+                  height: 7,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: (bidRatio * 1000).round().clamp(1, 999),
+                        child: Container(color: const Color(0xFF16B980)),
+                      ),
+                      Expanded(
+                        flex: (askRatio * 1000).round().clamp(1, 999),
+                        child: Container(color: const Color(0xFFFF4E6A)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '${(askRatio * 100).toStringAsFixed(2)}%',
+              style: const TextStyle(color: Color(0xFFFF4E6A), fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Row(
+            children: [
+              Expanded(child: Text('0.01', style: TextStyle(fontSize: 12))),
+              Icon(Icons.keyboard_arrow_down, size: 18),
+              Icon(Icons.view_module, size: 18, color: Colors.black54),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  String _price(double value) =>
-      value >= 1000 ? value.toStringAsFixed(2) : value.toStringAsPrecision(7);
+  static String _spread(OrderBookSnapshot snapshot) {
+    final spread = snapshot.bestAsk - snapshot.bestBid;
+    if (spread <= 0) return '--';
+    return spread >= 1
+        ? spread.toStringAsFixed(2)
+        : spread.toStringAsPrecision(4);
+  }
+}
+
+class _BookLevelRow extends StatelessWidget {
+  const _BookLevelRow({
+    required this.level,
+    required this.color,
+    required this.maxQuantity,
+    required this.alignRight,
+  });
+
+  final OrderBookLevel level;
+  final Color color;
+  final double maxQuantity;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    final ratio = maxQuantity == 0 ? 0.0 : (level.quantity / maxQuantity);
+    return SizedBox(
+      height: 24,
+      child: Stack(
+        children: [
+          Align(
+            alignment:
+                alignRight ? Alignment.centerRight : Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: ratio.clamp(0.04, 1),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.09)),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  level.price >= 1000
+                      ? level.price.toStringAsFixed(2)
+                      : level.price.toStringAsPrecision(7),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  level.quantity.toStringAsPrecision(5),
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CandleMetric extends StatelessWidget {
@@ -595,84 +1150,12 @@ class _GuideLine extends StatelessWidget {
                 TextSpan(
                   children: [
                     TextSpan(
-                        text: '$title: ',
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                      text: '$title: ',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     TextSpan(text: text),
                   ],
                 ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
-class _OrderBookTable extends StatelessWidget {
-  const _OrderBookTable({required this.snapshot});
-
-  final OrderBookSnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    final asks = snapshot.asks.take(8).toList().reversed;
-    final bids = snapshot.bids.take(8);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            const Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Precio (USDT)',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'Cantidad',
-                    textAlign: TextAlign.end,
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-            const Divider(),
-            ...asks.map((level) => _level(level, Colors.redAccent)),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Text(
-                snapshot.midpoint >= 1000
-                    ? snapshot.midpoint.toStringAsFixed(2)
-                    : snapshot.midpoint.toStringAsPrecision(7),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...bids.map((level) => _level(level, Colors.greenAccent)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _level(OrderBookLevel level, Color color) => SizedBox(
-        height: 26,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                level.price.toStringAsPrecision(8),
-                style: TextStyle(color: color),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                level.quantity.toStringAsPrecision(6),
-                textAlign: TextAlign.end,
               ),
             ),
           ],
