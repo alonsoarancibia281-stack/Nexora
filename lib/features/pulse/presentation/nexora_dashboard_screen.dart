@@ -3,15 +3,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../market/data/binance_futures_market_service.dart';
 import '../../market/data/binance_market_service.dart';
 import '../../market/domain/candle.dart';
 import '../../market/domain/market_asset.dart';
-import '../../market/domain/symbol_trading_rules.dart';
 import '../data/pulse_ai_service.dart';
 import '../data/pulse_round_history_repository.dart';
 import '../domain/btc_5m_logistic_model.dart';
-import '../domain/futures_trade_planner.dart';
 import '../domain/market_knowledge_framework.dart';
 import '../domain/pulse_ai_consensus.dart';
 import '../domain/pulse_decision_gate.dart';
@@ -31,7 +28,7 @@ class NexoraDashboardScreen extends StatefulWidget {
 }
 
 class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
-  final _service = BinanceFuturesMarketService();
+  final _service = BinanceMarketService();
   final _engine = const PulseEngine();
   final _ai = const PulseAiService();
   final _calibrator = const PulseProbabilityCalibrator();
@@ -41,7 +38,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   final _knowledge = const MarketKnowledgeFramework();
   final _historyRepository = PulseRoundHistoryRepository();
   final _decisionGate = PulseDecisionGate();
-  final _futuresPlanner = const FuturesTradePlanner();
 
   Timer? _clock;
   Timer? _refreshTimer;
@@ -57,11 +53,9 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   Btc5mLogisticResult? _logisticPrediction;
   PulseEnsemble100Result? _ensemblePrediction;
   LockedPulseDecision? _lockedDecision;
-  FuturesTradePlan? _futuresPlan;
   OrderBookSnapshot? _book;
   AggTradeSnapshot? _trades;
   MarketAsset? _ticker;
-  SymbolTradingRules? _tradingRules;
   List<Candle> _candles5m = const [];
   List<PulseRoundObservation> _roundObservations = [];
   List<PulseRoundOutcome> _outcomes = [];
@@ -173,7 +167,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
       _logisticPrediction = null;
       _ensemblePrediction = null;
       _lockedDecision = null;
-      _futuresPlan = null;
       _roundObservations = [];
       _probabilityTrail = [];
       _decisionGate.reset();
@@ -233,8 +226,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
         tickerIsStale
             ? _service.loadTicker24h('BTCUSDT')
             : Future<MarketAsset?>.value(_ticker),
-        _loadTradingRulesOrNull(),
-        _service.loadPremiumSnapshot('BTCUSDT'),
       ]);
       final candles1m = results[0] as List<Candle>;
       final candles5m = results[1] as List<Candle>;
@@ -242,8 +233,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
       final book = results[3] as OrderBookSnapshot;
       final trades = results[4] as AggTradeSnapshot;
       final ticker = results[5] as MarketAsset?;
-      final tradingRules = results[6] as SymbolTradingRules?;
-      final premium = results[7] as FuturesPremiumSnapshot;
       final currentPrice = candles1m.last.close;
 
       double? startPrice = _startPrice;
@@ -295,7 +284,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
           secondsRemaining: secondsRemaining,
           book: book,
           trades: trades,
-          premium: premium,
         );
         ethConfirmation = analystInput.get('ethConfirmation');
         ensemblePrediction = _ensemble100.analyze(analystInput);
@@ -348,25 +336,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
               observedAt: _binanceNow,
               historicalAuditPassed: _historicalAuditPassed,
             );
-      final futuresPlan = _futuresPlan?.actionable == true
-          ? _futuresPlan!
-          : tradingRules == null
-              ? FuturesTradePlan.noTrade(
-                  reason: 'Esperando los filtros oficiales de Binance Futures.',
-                )
-              : _futuresPlanner.build(
-                  decision: decision,
-                  entryCandles: candles1m,
-                  contextCandles: candles5m,
-                  bestBid: book.bestBid,
-                  bestAsk: book.bestAsk,
-                  analystAgreement: ensemblePrediction?.agreement ?? 0,
-                  statisticalQuality: statPrediction?.signalQuality ?? 0,
-                  instability: signal.instabilityScore,
-                  rules: tradingRules,
-                  premium: premium,
-                  validUntil: _roundEnd ?? _binanceNow,
-                );
 
       final trail = [..._probabilityTrail];
       if (trail.isEmpty ||
@@ -412,8 +381,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
         _ensemblePrediction = ensemblePrediction;
         _aiPrediction = aiPrediction;
         _lockedDecision = decision;
-        _futuresPlan = futuresPlan;
-        _tradingRules = tradingRules ?? _tradingRules;
         _rawProbabilityUp = rawProbability;
         _ethConfirmation = ethConfirmation;
         _probabilityTrail = trail;
@@ -433,15 +400,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
     }
   }
 
-  Future<SymbolTradingRules?> _loadTradingRulesOrNull() async {
-    if (_tradingRules != null) return _tradingRules;
-    try {
-      return await _service.loadTradingRules('BTCUSDT');
-    } catch (_) {
-      return null;
-    }
-  }
-
   AnalystInput _buildAnalystInput({
     required List<Candle> candles,
     required List<Candle> ethCandles,
@@ -451,7 +409,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
     required int secondsRemaining,
     required OrderBookSnapshot book,
     required AggTradeSnapshot trades,
-    required FuturesPremiumSnapshot premium,
   }) {
     double norm(double value, double scale) =>
         scale == 0 ? 0 : (value / scale).clamp(-1.0, 1.0).toDouble();
@@ -498,8 +455,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
         : (ethCloses.last - ethCloses[ethCloses.length - 4]) /
             ethCloses[ethCloses.length - 4] *
             100;
-    final fundingPressure = norm(-premium.fundingRate, .0005);
-    final basisPressure = norm(-premium.basisBps, 12);
 
     return AnalystInput(
       instability: signal.instabilityScore,
@@ -531,7 +486,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
         'breakoutQuality': norm(trades.priceImpulseBps, 10),
         'wickBias': signal.bodyPressure / 100,
         'ethConfirmation': norm(ethReturn, .25),
-        'exchangeConsensus': fundingPressure * .55 + basisPressure * .45,
+        'exchangeConsensus': 0,
         'betaResidual': norm(shortReturn - ethReturn, .25),
         'regimeTrend': signal.trendScore / 100,
         'regimePersistence': stat.autocorrelation.clamp(-1.0, 1.0).toDouble(),
@@ -928,10 +883,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
               final distributionPanel = AnalystDistributionPanel(
                 ensemble: _ensemblePrediction,
               );
-              final futuresPlanPanel = FuturesTradePlanPanel(
-                plan: _futuresPlan,
-                validUntil: _roundEnd,
-              );
               final teamsPanel = AnalystTeamsPanel(
                 ensemble: _ensemblePrediction,
               );
@@ -984,7 +935,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
                               flex: 22,
                               child: desktopColumn([
                                 predictionPanel,
-                                futuresPlanPanel,
                                 qualityPanel,
                               ]),
                             ),
@@ -1032,7 +982,6 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
                       runSpacing: gap,
                       children: [
                         SizedBox(width: widthFor(1), child: predictionPanel),
-                        SizedBox(width: widthFor(1), child: futuresPlanPanel),
                         SizedBox(width: widthFor(1), child: distributionPanel),
                         SizedBox(width: widthFor(1), child: teamsPanel),
                         SizedBox(width: widthFor(1), child: knowledgePanel),

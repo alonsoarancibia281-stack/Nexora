@@ -140,6 +140,8 @@ class NexoraDashboardHeader extends StatelessWidget {
     required this.roundNumber,
     required this.loading,
     required this.onBack,
+    this.symbolLabel = 'BTC/USDT',
+    this.sourceLabel = 'BINANCE REAL',
   });
 
   final double price;
@@ -148,6 +150,8 @@ class NexoraDashboardHeader extends StatelessWidget {
   final int roundNumber;
   final bool loading;
   final VoidCallback? onBack;
+  final String symbolLabel;
+  final String sourceLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -197,7 +201,7 @@ class NexoraDashboardHeader extends StatelessWidget {
             value: '#$roundNumber',
           ),
           _HeaderBlock(
-            label: 'BTCUSDT PERP.',
+            label: symbolLabel,
             value: price <= 0 ? '—' : _price(price),
             valueColor: nexoraGreen,
             suffix: price <= 0
@@ -211,7 +215,7 @@ class NexoraDashboardHeader extends StatelessWidget {
           ),
           _HeaderBlock(
             label: 'FUENTE',
-            value: loading ? 'ACTUALIZANDO' : 'BINANCE USDⓈ-M',
+            value: loading ? 'ACTUALIZANDO' : sourceLabel,
             valueColor: loading ? nexoraAmber : nexoraGreen,
           ),
         ],
@@ -785,16 +789,18 @@ class MarketChartPanel extends StatelessWidget {
     required this.currentPrice,
     required this.boxHigh,
     required this.boxLow,
+    this.title = 'Gráfico BTC/USDT · 5m',
   });
 
   final List<Candle> candles;
   final double currentPrice;
   final double boxHigh;
   final double boxLow;
+  final String title;
 
   @override
   Widget build(BuildContext context) => NexoraPanel(
-        title: 'Gráfico BTCUSDT Perp · 5m',
+        title: title,
         subtitle: 'Velas y volumen reales de Binance',
         trailing: Text(
           currentPrice <= 0 ? '—' : _price(currentPrice),
