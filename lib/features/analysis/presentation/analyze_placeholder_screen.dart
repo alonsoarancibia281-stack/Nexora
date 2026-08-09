@@ -50,7 +50,7 @@ class _AnalyzeScreenState extends State<AnalyzePlaceholderScreen> {
 
   @override
   Widget build(BuildContext context) => MainNavigationScaffold(
-        currentIndex: 2,
+        currentIndex: 3,
         child: Scaffold(
           appBar: AppBar(title: const Text('Analizar')),
           body: ListView(

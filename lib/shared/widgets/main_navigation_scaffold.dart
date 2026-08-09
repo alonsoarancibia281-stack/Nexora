@@ -7,7 +7,7 @@ class MainNavigationScaffold extends StatelessWidget {
   final Widget child;
   final int currentIndex;
 
-  static const _routes = ['/home', '/market', '/analyze', '/favorites'];
+  static const _routes = ['/home', '/market', '/order-book', '/analyze', '/favorites'];
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -18,6 +18,7 @@ class MainNavigationScaffold extends StatelessWidget {
           destinations: const [
             NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Inicio'),
             NavigationDestination(icon: Icon(Icons.show_chart_outlined), selectedIcon: Icon(Icons.show_chart), label: 'Mercado'),
+            NavigationDestination(icon: Icon(Icons.swap_vert), selectedIcon: Icon(Icons.swap_vert_circle), label: 'Flujo'),
             NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'Analizar'),
             NavigationDestination(icon: Icon(Icons.star_outline), selectedIcon: Icon(Icons.star), label: 'Favoritos'),
           ],

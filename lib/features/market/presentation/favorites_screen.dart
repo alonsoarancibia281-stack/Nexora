@@ -11,7 +11,7 @@ class FavoritesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final favorites = ref.watch(favoriteAssetsProvider);
     return MainNavigationScaffold(
-      currentIndex: 3,
+      currentIndex: 4,
       child: Scaffold(
         appBar: AppBar(title: const Text('Favoritos')),
         body: favorites.when(
