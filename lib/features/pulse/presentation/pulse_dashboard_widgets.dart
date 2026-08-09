@@ -144,6 +144,7 @@ class NexoraDashboardHeader extends StatelessWidget {
     this.brandSubtitle = 'META-MOTOR DE 100 ANALISTAS',
     this.symbolLabel = 'BTC/USDT',
     this.sourceLabel = 'BINANCE REAL',
+    this.continuousMode = false,
   });
 
   final double price;
@@ -156,6 +157,7 @@ class NexoraDashboardHeader extends StatelessWidget {
   final String brandSubtitle;
   final String symbolLabel;
   final String sourceLabel;
+  final bool continuousMode;
 
   @override
   Widget build(BuildContext context) {
@@ -200,10 +202,11 @@ class NexoraDashboardHeader extends StatelessWidget {
               ),
             ],
           ),
-          _HeaderBlock(
-            label: 'RONDA EN VIVO',
-            value: '#$roundNumber',
-          ),
+          if (!continuousMode)
+            _HeaderBlock(
+              label: 'RONDA EN VIVO',
+              value: '#$roundNumber',
+            ),
           _HeaderBlock(
             label: symbolLabel,
             value: price <= 0 ? '—' : _price(price),
@@ -214,8 +217,9 @@ class NexoraDashboardHeader extends StatelessWidget {
             suffixColor: changeColor,
           ),
           _HeaderBlock(
-            label: 'PRÓXIMOS 5 MINUTOS',
-            value: countdown,
+            label: continuousMode ? 'MODO' : 'PRÓXIMOS 5 MINUTOS',
+            value: continuousMode ? 'ANÁLISIS CONTINUO' : countdown,
+            valueColor: continuousMode ? nexoraGreen : null,
           ),
           _HeaderBlock(
             label: 'FUENTE',
@@ -500,12 +504,12 @@ class FuturesTradePlanPanel extends StatelessWidget {
     super.key,
     required this.symbol,
     required this.plan,
-    required this.validUntil,
+    required this.updatedAt,
   });
 
   final String symbol;
   final FuturesTradePlan? plan;
-  final DateTime? validUntil;
+  final DateTime? updatedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -517,18 +521,18 @@ class FuturesTradePlanPanel extends StatelessWidget {
         : isLong
             ? nexoraGreen
             : nexoraRed;
-    final end = validUntil?.toLocal();
-    final validity = end == null
+    final update = updatedAt?.toLocal();
+    final updateTime = update == null
         ? '—'
-        : '${end.hour.toString().padLeft(2, '0')}:'
-            '${end.minute.toString().padLeft(2, '0')}:'
-            '${end.second.toString().padLeft(2, '0')}';
+        : '${update.hour.toString().padLeft(2, '0')}:'
+            '${update.minute.toString().padLeft(2, '0')}:'
+            '${update.second.toString().padLeft(2, '0')}';
     final baseAsset = symbol.endsWith('USDT')
         ? symbol.substring(0, symbol.length - 'USDT'.length)
         : symbol;
     return NexoraPanel(
       title: 'Plan Futures $symbol Perpetual',
-      subtitle: 'USDⓈ-M · margen aislado · riesgo calculado',
+      subtitle: 'USDⓈ-M · análisis continuo · capital autoajustado',
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(
@@ -551,7 +555,9 @@ class FuturesTradePlanPanel extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             !actionable
-                ? 'NO OPERAR'
+                ? current == null
+                    ? 'ANALIZANDO MERCADO'
+                    : 'ESPERAR / SIN ENTRADA'
                 : isLong
                     ? 'COMPRAR / LONG'
                     : 'VENDER / SHORT',
@@ -583,7 +589,7 @@ class FuturesTradePlanPanel extends StatelessWidget {
               value: 'USDⓈ-M · AISLADO · ${current.leverage}x',
             ),
             NexoraMetricRow(
-              label: 'Margen asignado',
+              label: 'Margen calculado',
               value: '${current.margin.toStringAsFixed(2)} USDT',
             ),
             NexoraMetricRow(
@@ -639,7 +645,10 @@ class FuturesTradePlanPanel extends StatelessWidget {
               label: 'Riesgo/beneficio bruto',
               value: '1:${current.riskRewardRatio.toStringAsFixed(1)}',
             ),
-            NexoraMetricRow(label: 'Válido hasta', value: validity),
+            NexoraMetricRow(
+              label: 'Última actualización',
+              value: updateTime,
+            ),
           ] else ...[
             const SizedBox(height: 7),
             Text(

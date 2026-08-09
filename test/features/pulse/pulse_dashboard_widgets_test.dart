@@ -112,7 +112,7 @@ void main() {
                     fundingCostUsd: 0,
                     confidence: 63,
                   ),
-                  validUntil: DateTime.utc(2026, 8, 9, 12, 5),
+                  updatedAt: DateTime.utc(2026, 8, 9, 12, 5),
                 ),
                 const AnalystDistributionPanel(ensemble: ensemble),
                 const AnalystTeamsPanel(ensemble: ensemble),
@@ -197,6 +197,7 @@ void main() {
             brandSubtitle: 'PLAN USDⓈ-M · POOL DE 100 ANALISTAS',
             symbolLabel: 'BTCUSDT PERP.',
             sourceLabel: 'BINANCE USDⓈ-M',
+            continuousMode: true,
           ),
         ),
       ),
@@ -205,6 +206,9 @@ void main() {
     expect(find.text('NEXORA FUTURES'), findsOneWidget);
     expect(find.text('BTCUSDT PERP.'), findsOneWidget);
     expect(find.text('BINANCE USDⓈ-M'), findsOneWidget);
+    expect(find.text('ANÁLISIS CONTINUO'), findsOneWidget);
+    expect(find.text('PRÓXIMOS 5 MINUTOS'), findsNothing);
+    expect(find.text('RONDA EN VIVO'), findsNothing);
     expect(find.text('PREDICCIÓN NEXORA'), findsNothing);
   });
 }

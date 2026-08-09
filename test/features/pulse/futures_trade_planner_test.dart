@@ -44,6 +44,28 @@ void main() {
     expect(plan.reason, contains('Binance rechazaría'));
   });
 
+  test('capital autoajustado usa el margen mínimo válido del contrato', () {
+    final plan = planner.build(
+      decision: _decision(PulseDirection.up, .72, now),
+      entryCandles: _candles(up: true, intervalMinutes: 1),
+      contextCandles: _candles(up: true, intervalMinutes: 5),
+      bestBid: 64999.9,
+      bestAsk: 65000,
+      analystAgreement: .70,
+      statisticalQuality: .25,
+      instability: 20,
+      rules: rules,
+      premium: premium,
+      validUntil: validUntil,
+      autoAdjustMargin: true,
+    );
+
+    expect(plan.action, FuturesTradeAction.long);
+    expect(plan.margin, greaterThan(5));
+    expect(plan.requestedMargin, plan.requiredMargin);
+    expect(plan.quantity, .001);
+  });
+
   test('con margen suficiente crea LONG con stop antes de liquidación', () {
     final plan = planner.build(
       decision: _decision(PulseDirection.up, .72, now),

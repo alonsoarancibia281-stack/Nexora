@@ -121,6 +121,7 @@ class FuturesTradePlanner {
     required DateTime validUntil,
     double requestedMargin = 5,
     int leverage = 3,
+    bool autoAdjustMargin = false,
   }) {
     final safeLeverage = leverage.clamp(1, 3);
     FuturesTradePlan abstain(String reason, {double requiredMargin = 0}) =>
@@ -190,7 +191,7 @@ class FuturesTradePlanner {
     );
     final requiredNotional = minimumQuantity * entry;
     final requiredMargin = _ceilCents(requiredNotional / safeLeverage * 1.002);
-    if (requestedMargin + .000001 < requiredMargin) {
+    if (!autoAdjustMargin && requestedMargin + .000001 < requiredMargin) {
       final baseAsset = rules.symbol.endsWith('USDT')
           ? rules.symbol.substring(0, rules.symbol.length - 'USDT'.length)
           : rules.symbol;
@@ -203,7 +204,10 @@ class FuturesTradePlanner {
       );
     }
 
-    final maximumNotional = requestedMargin * safeLeverage;
+    final effectiveMargin = autoAdjustMargin
+        ? math.max(requestedMargin, requiredMargin)
+        : requestedMargin;
+    final maximumNotional = effectiveMargin * safeLeverage;
     final quantity = _floorToStep(
       maximumNotional / entry,
       rules.quantityStep,
@@ -256,7 +260,7 @@ class FuturesTradePlanner {
     return FuturesTradePlan(
       action: action,
       reason: 'Confluencia confirmada; usar exclusivamente margen aislado.',
-      requestedMargin: requestedMargin,
+      requestedMargin: effectiveMargin,
       requiredMargin: requiredMargin,
       margin: notional / safeLeverage,
       leverage: safeLeverage,
