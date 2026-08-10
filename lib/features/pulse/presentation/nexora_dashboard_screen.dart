@@ -9,6 +9,7 @@ import '../../market/domain/market_asset.dart';
 import '../data/pulse_ai_service.dart';
 import '../data/pulse_round_history_repository.dart';
 import '../domain/btc_5m_logistic_model.dart';
+import '../domain/consensus_reversal_alert.dart';
 import '../domain/market_knowledge_framework.dart';
 import '../domain/pulse_ai_consensus.dart';
 import '../domain/pulse_decision_gate.dart';
@@ -38,6 +39,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   final _knowledge = const MarketKnowledgeFramework();
   final _historyRepository = PulseRoundHistoryRepository();
   final _decisionGate = PulseDecisionGate();
+  final _consensusReversalTracker = ConsensusReversalAlertTracker();
 
   Timer? _clock;
   Timer? _refreshTimer;
@@ -53,6 +55,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
   Btc5mLogisticResult? _logisticPrediction;
   PulseEnsemble100Result? _ensemblePrediction;
   LockedPulseDecision? _lockedDecision;
+  ConsensusReversalAlert? _consensusReversalAlert;
   OrderBookSnapshot? _book;
   AggTradeSnapshot? _trades;
   MarketAsset? _ticker;
@@ -167,9 +170,11 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
       _logisticPrediction = null;
       _ensemblePrediction = null;
       _lockedDecision = null;
+      _consensusReversalAlert = null;
       _roundObservations = [];
       _probabilityTrail = [];
       _decisionGate.reset();
+      _consensusReversalTracker.reset();
       if (mounted) setState(() {});
       await _load();
     } finally {
@@ -336,6 +341,24 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
               observedAt: _binanceNow,
               historicalAuditPassed: _historicalAuditPassed,
             );
+      final consensusDirection = ensemblePrediction == null
+          ? PulseDirection.noTrade
+          : ensemblePrediction.upAnalysts > ensemblePrediction.downAnalysts
+              ? PulseDirection.up
+              : ensemblePrediction.downAnalysts > ensemblePrediction.upAnalysts
+                  ? PulseDirection.down
+                  : PulseDirection.noTrade;
+      final supportingAnalysts = switch (consensusDirection) {
+        PulseDirection.up => ensemblePrediction?.upAnalysts ?? 0,
+        PulseDirection.down => ensemblePrediction?.downAnalysts ?? 0,
+        PulseDirection.noTrade => 0,
+      };
+      final consensusReversalAlert = _consensusReversalTracker.update(
+        publishedDirection: decision?.direction,
+        consensusDirection: consensusDirection,
+        supportingAnalysts: supportingAnalysts,
+        observedAt: _binanceNow,
+      );
 
       final trail = [..._probabilityTrail];
       if (trail.isEmpty ||
@@ -381,6 +404,7 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
         _ensemblePrediction = ensemblePrediction;
         _aiPrediction = aiPrediction;
         _lockedDecision = decision;
+        _consensusReversalAlert = consensusReversalAlert;
         _rawProbabilityUp = rawProbability;
         _ethConfirmation = ethConfirmation;
         _probabilityTrail = trail;
@@ -1034,6 +1058,12 @@ class _NexoraDashboardScreenState extends State<NexoraDashboardScreen> {
                             fontSize: 11,
                           ),
                         ),
+                      ),
+                    ],
+                    if (_consensusReversalAlert != null) ...[
+                      const SizedBox(height: gap),
+                      ConsensusDirectionAlertPanel(
+                        alert: _consensusReversalAlert!,
                       ),
                     ],
                     const SizedBox(height: gap),

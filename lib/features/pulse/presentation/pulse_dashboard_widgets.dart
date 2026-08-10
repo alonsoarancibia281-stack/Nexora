@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../market/data/binance_market_service.dart';
 import '../../market/domain/candle.dart';
+import '../domain/consensus_reversal_alert.dart';
+import '../domain/futures_trade_planner.dart';
 import '../domain/pulse_decision_gate.dart';
 import '../domain/pulse_ensemble_100.dart';
 import '../domain/pulse_round_tracker.dart';
 import '../domain/pulse_signal.dart';
-import '../domain/futures_trade_planner.dart';
 
 const nexoraGreen = Color(0xFF37E477);
 const nexoraRed = Color(0xFFFF555F);
@@ -285,6 +286,115 @@ class _HeaderBlock extends StatelessWidget {
           ],
         ),
       );
+}
+
+class ConsensusDirectionAlertPanel extends StatelessWidget {
+  const ConsensusDirectionAlertPanel({
+    super.key,
+    required this.alert,
+  });
+
+  final ConsensusReversalAlert alert;
+
+  String _directionLabel(PulseDirection direction) => switch (direction) {
+        PulseDirection.up => 'ALTA',
+        PulseDirection.down => 'BAJA',
+        PulseDirection.noTrade => 'SIN DIRECCIÓN',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final update = alert.detectedAt.toLocal();
+    final detectedAt = '${update.hour.toString().padLeft(2, '0')}:'
+        '${update.minute.toString().padLeft(2, '0')}:'
+        '${update.second.toString().padLeft(2, '0')}';
+    final consensusColor =
+        alert.consensusDirection == PulseDirection.up ? nexoraGreen : nexoraRed;
+
+    return Semantics(
+      liveRegion: true,
+      label:
+          'Alerta de cambio de dirección. El consenso actual apunta a ${_directionLabel(alert.consensusDirection)}.',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: nexoraAmber.withValues(alpha: .09),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: nexoraAmber.withValues(alpha: .75),
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: nexoraAmber,
+              size: 24,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ALERTA · CAMBIO DE DIRECCIÓN',
+                    style: TextStyle(
+                      color: nexoraAmber,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .45,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 3,
+                    children: [
+                      Text(
+                        'Señal publicada: ${_directionLabel(alert.publishedDirection)}',
+                        style: const TextStyle(
+                          color: Color(0xFFB8C2CA),
+                          fontSize: 11,
+                        ),
+                      ),
+                      const Text(
+                        '→',
+                        style: TextStyle(color: nexoraMuted, fontSize: 11),
+                      ),
+                      Text(
+                        'Consenso actual: ${_directionLabel(alert.consensusDirection)}',
+                        style: TextStyle(
+                          color: consensusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${alert.supportingAnalysts} de 100 analistas sostienen la dirección contraria durante 3 lecturas.',
+                    style: const TextStyle(
+                      color: Color(0xFFB8C2CA),
+                      fontSize: 10,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Detectado $detectedAt · La señal publicada no cambia automáticamente.',
+                    style: const TextStyle(color: nexoraMuted, fontSize: 9),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class PredictionPanel extends StatelessWidget {

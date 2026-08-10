@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexora_markets_ai/features/market/data/binance_market_service.dart';
 import 'package:nexora_markets_ai/features/market/domain/candle.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/consensus_reversal_alert.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_decision_gate.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_ensemble_100.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_round_tracker.dart';
@@ -179,6 +180,31 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(selected, 'SOLUSDT');
+  });
+
+  testWidgets('muestra alerta visual ante una reversión sostenida',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: ConsensusDirectionAlertPanel(
+            alert: ConsensusReversalAlert(
+              publishedDirection: PulseDirection.down,
+              consensusDirection: PulseDirection.up,
+              supportingAnalysts: 67,
+              detectedAt: DateTime.utc(2026, 8, 9, 20, 15, 9),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('ALERTA · CAMBIO DE DIRECCIÓN'), findsOneWidget);
+    expect(find.textContaining('Señal publicada: BAJA'), findsOneWidget);
+    expect(find.textContaining('Consenso actual: ALTA'), findsOneWidget);
+    expect(find.textContaining('67 de 100 analistas'), findsOneWidget);
+    expect(find.textContaining('no cambia automáticamente'), findsOneWidget);
   });
 
   testWidgets('Futures usa una identidad distinta de Predicciones',

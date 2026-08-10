@@ -1,7 +1,7 @@
 name: nexora_markets_ai
 description: Educational crypto market analysis application.
 publish_to: 'none'
-version: 0.6.1+10
+version: 0.6.2+11
 environment:
   sdk: '>=3.4.0 <4.0.0'
 dependencies:
