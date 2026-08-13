@@ -71,7 +71,10 @@ class _PulseScreenState extends State<PulseScreen> {
   final _archive = const PulsePatternArchive();
   final _fusion = const PulseConsensusEngine();
   final _auditBoard = const PulseAuditBoard();
-  final _chief = const PulseChiefAnalyst();
+
+  /// When the chief locks the call. Anticipation and accuracy trade off along
+  /// a fixed curve, so this is a choice the user gets to make.
+  PulseChiefAnalyst _chief = const PulseChiefAnalyst();
   final _evolutionEngine = const PulseEvolutionEngine();
   final _features = const PulseFeatureFactory();
 
@@ -585,7 +588,7 @@ class _PulseScreenState extends State<PulseScreen> {
         if (_deliberation.length > 40) _deliberation.removeAt(0);
 
         if (_verdict == null &&
-            seconds <= PulseChiefAnalyst.lockAtSecondsRemaining) {
+            seconds <= _chief.lockAtSecondsRemaining) {
           _decisionVotes = ensemble.votes;
           _verdict = _chief.decide(
             samples: _deliberation,
@@ -714,8 +717,8 @@ class _PulseScreenState extends State<PulseScreen> {
   /// Seconds left in the chief analyst's one-minute decision window.
   int get _decisionSecondsLeft {
     final elapsed = 300 - _remainingSeconds;
-    final left = PulseChiefAnalyst.decisionWindowSeconds - elapsed;
-    return left.clamp(0, PulseChiefAnalyst.decisionWindowSeconds);
+    final left = _chief.decisionWindowSeconds - elapsed;
+    return left.clamp(0, _chief.decisionWindowSeconds);
   }
 
   bool get _deciding => _verdict == null;
@@ -899,6 +902,8 @@ class _PulseScreenState extends State<PulseScreen> {
           ),
           const SizedBox(height: 12),
           LiquidWaveBar(value: _roundProgress),
+          const SizedBox(height: 12),
+          _decisionModeSelector(),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -922,6 +927,52 @@ class _PulseScreenState extends State<PulseScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Anticipation versus accuracy. The percentages are what the realised
+  /// fraction of the candle delivers on its own at each moment, so they are the
+  /// floor the engine works from, not a promise.
+  Widget _decisionModeSelector() {
+    const options = <int>[60, 180, 270];
+    const labels = <String>['1 min', '3 min', '4½ min'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('MOMENTO DE LA DECISIÓN', style: LiquidType.micro),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (var i = 0; i < options.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: _verdict != null
+                      ? null
+                      : () => setState(() =>
+                          _chief = PulseChiefAnalyst(
+                              decisionWindowSeconds: options[i])),
+                  child: LiquidChip(
+                    label:
+                        '${labels[i]} · ${(PulseChiefAnalyst(decisionWindowSeconds: options[i]).mechanicalCeiling * 100).toStringAsFixed(0)}%',
+                    dense: true,
+                    filled: _chief.decisionWindowSeconds == options[i],
+                    color: _chief.decisionWindowSeconds == options[i]
+                        ? LiquidPalette.primary
+                        : LiquidPalette.inkFaint,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Cuanto más tarde decide, más parte de la vela ya ocurrió y más '
+          'acierta — pero menos anticipa. El porcentaje es el piso mecánico de '
+          'cada momento, no una promesa del motor.',
+          style: LiquidType.caption.copyWith(fontSize: 10.5),
+        ),
+      ],
     );
   }
 

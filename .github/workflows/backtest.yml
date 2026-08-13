@@ -45,7 +45,8 @@ jobs:
           if [ "${{ github.event.inputs.archive }}" = "false" ]; then
             ARCHIVE_FLAG="--no-archive"
           fi
-          dart run tool/backtest.dart --rounds "$ROUNDS" $ARCHIVE_FLAG | tee backtest-report.txt
+          # --frontier barre 60/120/180/240/270s: la curva anticipación-acierto.
+          dart run tool/backtest.dart --rounds "$ROUNDS" --frontier $ARCHIVE_FLAG | tee backtest-report.txt
       - name: Publish report in the job summary
         if: always()
         run: |
@@ -53,7 +54,7 @@ jobs:
             echo '## Backtest'
             echo ''
             echo '```'
-            tail -n 80 backtest-report.txt
+            grep -E 'Decidiendo a los|Acierto del motor|Movimiento ya realizado|Techo mecánico|Con lectura|Sin lectura|Ventaja del motor' backtest-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload report

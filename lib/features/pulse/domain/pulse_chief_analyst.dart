@@ -129,13 +129,28 @@ class ChiefVerdict {
 /// remaining four minutes. It does not revise afterwards: a call that keeps
 /// changing is not a call.
 class PulseChiefAnalyst {
-  const PulseChiefAnalyst();
+  const PulseChiefAnalyst({this.decisionWindowSeconds = defaultWindowSeconds});
 
   /// Length of the deliberation window, in seconds.
-  static const int decisionWindowSeconds = 60;
+  ///
+  /// This is the single most consequential number in the whole system, and the
+  /// reason is arithmetic rather than modelling. At the moment of the call a
+  /// fraction t/T of the candle has already happened, so even with no
+  /// predictive skill at all the realised part alone decides the close with
+  /// probability ½ + arcsin(√(t/T))/π — 64.8% at one minute, 78.2% at three,
+  /// 89.8% at four and a half. Waiting buys accuracy; it does not buy insight.
+  final int decisionWindowSeconds;
+
+  static const int defaultWindowSeconds = 60;
 
   /// Round time left when the verdict must be on the table.
-  static const int lockAtSecondsRemaining = 300 - decisionWindowSeconds;
+  int get lockAtSecondsRemaining => 300 - decisionWindowSeconds;
+
+  /// The accuracy the realised fraction alone would deliver, with zero skill.
+  double get mechanicalCeiling {
+    final fraction = (decisionWindowSeconds / 300).clamp(0.0, 1.0).toDouble();
+    return .5 + math.asin(math.sqrt(fraction)) / math.pi;
+  }
 
   /// Recency half-life inside the decision window, in seconds.
   static const double recencyHalfLifeSeconds = 22;

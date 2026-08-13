@@ -333,7 +333,7 @@ void main() {
         signal: signal(),
         entryPrice: 45000,
         decidedAt: decidedAt,
-        secondsRemaining: PulseChiefAnalyst.lockAtSecondsRemaining,
+        secondsRemaining: chief.lockAtSecondsRemaining,
       );
 
       expect(verdict.samplesUsed, 12);
@@ -379,7 +379,7 @@ void main() {
             secondsRemaining: secondsRemaining,
           );
 
-      final complete = decide(12, PulseChiefAnalyst.lockAtSecondsRemaining);
+      final complete = decide(12, chief.lockAtSecondsRemaining);
       expect(complete.fullDeliberation, isTrue);
 
       // Joined the round with two minutes left: one glance, not a window.
@@ -392,7 +392,7 @@ void main() {
       );
 
       // Too few readings even at the right moment still counts as incomplete.
-      final thin = decide(2, PulseChiefAnalyst.lockAtSecondsRemaining);
+      final thin = decide(2, chief.lockAtSecondsRemaining);
       expect(thin.fullDeliberation, isFalse);
     });
 
@@ -426,7 +426,7 @@ void main() {
             signal: signal(),
             entryPrice: 45000,
             decidedAt: decidedAt,
-            secondsRemaining: PulseChiefAnalyst.lockAtSecondsRemaining,
+            secondsRemaining: chief.lockAtSecondsRemaining,
           );
 
       final coinFlip = decide(.505);

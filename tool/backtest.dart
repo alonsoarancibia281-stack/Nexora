@@ -167,11 +167,19 @@ class RoundResult {
 Future<void> main(List<String> args) async {
   var rounds = 1500;
   var useArchive = true;
+  var decideAt = <int>[60];
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '--rounds' && i + 1 < args.length) {
       rounds = int.tryParse(args[i + 1]) ?? rounds;
     }
     if (args[i] == '--no-archive') useArchive = false;
+    if (args[i] == '--decide-at' && i + 1 < args.length) {
+      decideAt = args[i + 1]
+          .split(',')
+          .map((v) => int.tryParse(v.trim()) ?? 60)
+          .toList();
+    }
+    if (args[i] == '--frontier') decideAt = <int>[60, 120, 180, 240, 270];
   }
 
   stdout.writeln('Descargando historia de Binance…');
@@ -183,6 +191,35 @@ Future<void> main(List<String> args) async {
   final fourHour = useArchive ? await loadKlines('BTCUSDT', '4h', 1000) : <Candle>[];
   final daily = useArchive ? await loadKlines('BTCUSDT', '1d', 1000) : <Candle>[];
 
+  for (final elapsed in decideAt) {
+    if (decideAt.length > 1) {
+      stdout.writeln('\n\n>>> Decidiendo a los ${elapsed}s de la ronda');
+    }
+    await evaluate(
+      elapsed: elapsed,
+      rounds: rounds,
+      useArchive: useArchive,
+      oneMinute: oneMinute,
+      fiveMinute: fiveMinute,
+      ethOneMinute: ethOneMinute,
+      hourly: hourly,
+      fourHour: fourHour,
+      daily: daily,
+    );
+  }
+}
+
+Future<void> evaluate({
+  required int elapsed,
+  required int rounds,
+  required bool useArchive,
+  required List<Candle> oneMinute,
+  required List<Candle> fiveMinute,
+  required List<Candle> ethOneMinute,
+  required List<Candle> hourly,
+  required List<Candle> fourHour,
+  required List<Candle> daily,
+}) async {
   const engine = PulseEngine();
   const statisticalEngine = PulseStatisticalEngine();
   const calibrator = PulseProbabilityCalibrator();
@@ -192,7 +229,7 @@ Future<void> main(List<String> args) async {
   const archive = PulsePatternArchive();
   const fusion = PulseConsensusEngine();
   const board = PulseAuditBoard();
-  const chief = PulseChiefAnalyst();
+  final chief = PulseChiefAnalyst(decisionWindowSeconds: elapsed);
   const evolutionEngine = PulseEvolutionEngine();
   const features = PulseFeatureFactory();
 
@@ -207,7 +244,7 @@ Future<void> main(List<String> args) async {
   for (var i = firstRound; i < fiveMinute.length - 1; i++) {
     final round = fiveMinute[i];
     final roundStart = round.openTime.toUtc();
-    final decisionMoment = roundStart.add(const Duration(minutes: 1));
+    final decisionMoment = roundStart.add(Duration(seconds: elapsed));
 
     final minuteIndex = lastIndexBefore(oneMinute, decisionMoment);
     if (minuteIndex < 130) continue;
@@ -217,7 +254,7 @@ Future<void> main(List<String> args) async {
     final candles = oneMinute.sublist(minuteIndex - 119, minuteIndex + 1);
     final ethCandles = ethOneMinute.sublist(ethIndex - 89, ethIndex + 1);
     final entry = round.open;
-    const secondsRemaining = 240;
+    final secondsRemaining = 300 - elapsed;
 
     // The historical archive is restudied hourly: analog structure does not
     // change materially from one five-minute bar to the next, and restudying
@@ -370,7 +407,7 @@ Future<void> main(List<String> args) async {
   }
   stdout.writeln();
 
-  report(results, DateTime.now().difference(started));
+  report(results, DateTime.now().difference(started), chief);
 }
 
 /// Candles that had already *closed* by [moment].
@@ -393,7 +430,11 @@ List<Candle> _sliceBefore(
   return candles.sublist(start, index + 1);
 }
 
-void report(List<RoundResult> results, Duration elapsed) {
+void report(
+  List<RoundResult> results,
+  Duration elapsed,
+  PulseChiefAnalyst chief,
+) {
   if (results.isEmpty) {
     stdout.writeln('Sin rondas evaluadas.');
     return;
@@ -421,6 +462,8 @@ void report(List<RoundResult> results, Duration elapsed) {
       '${results.first.roundStart.toIso8601String()} → '
       '${results.last.roundStart.toIso8601String()}');
   stdout.writeln('Tiempo de cómputo ......... ${elapsed.inSeconds}s');
+  stdout.writeln('Decisión a los ............ ${chief.decisionWindowSeconds}s '
+      '(techo mecánico ${(chief.mechanicalCeiling * 100).toStringAsFixed(2)}%)');
   stdout.writeln('');
   final baselineHits = results.where((r) => r.baselineHit).length;
   final baselineAccuracy = baselineHits / n;
@@ -438,8 +481,11 @@ void report(List<RoundResult> results, Duration elapsed) {
   stdout.writeln('REFERENCIAS — el rival correcto no es la moneda:');
   stdout.writeln('  Clase mayoritaria ....... '
       '${(baseRate * 100).toStringAsFixed(2)}%');
-  stdout.writeln('  Dirección del 1er minuto  '
+  stdout.writeln('  Movimiento ya realizado   '
       '${(baselineAccuracy * 100).toStringAsFixed(2)}%  ← regla trivial');
+  stdout.writeln('  Techo mecánico teórico .. '
+      '${(chief.mechanicalCeiling * 100).toStringAsFixed(2)}%  '
+      '(½+arcsin√(t/T)/π)');
   stdout.writeln('  Ventaja del motor ....... '
       '${(excess * 100).toStringAsFixed(2)} puntos  '
       '(z=${excessZ.toStringAsFixed(2)})');
