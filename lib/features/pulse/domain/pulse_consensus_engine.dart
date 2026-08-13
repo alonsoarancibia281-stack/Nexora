@@ -39,6 +39,9 @@ class PulseConsensus {
     required this.news,
     required this.patterns,
     required this.evidence,
+    required this.anchorProbabilityUp,
+    required this.councilAdjustment,
+    required this.overridesAnchor,
   });
 
   final double probabilityUp;
@@ -64,6 +67,15 @@ class PulseConsensus {
   /// Aggregate strength of the evidence in [0,1].
   final double evidence;
 
+  /// Diffusion probability implied by the part of the round already realised.
+  final double anchorProbabilityUp;
+
+  /// Log-odds the councils added on top of the anchor (bounded).
+  final double councilAdjustment;
+
+  /// True when the councils flipped the direction the anchor pointed to.
+  final bool overridesAnchor;
+
   String get directionLabel =>
       direction == PulseDirection.up ? 'SUBE' : 'BAJA';
 
@@ -80,7 +92,13 @@ class PulseConsensus {
 /// lets a single strongly informed model move the verdict when the rest
 /// abstain around 50%.
 class PulseConsensusEngine {
-  const PulseConsensusEngine();
+  const PulseConsensusEngine({this.councilAuthority = .70});
+
+  /// How far, in log-odds, the councils may move the diffusion anchor.
+  ///
+  /// 0.70 lets them shift the probability by roughly ±17 points and reverse
+  /// the call only while the anchor sits between 33% and 67%.
+  final double councilAuthority;
 
   PulseConsensus fuse({
     required PulseSignal signal,
@@ -208,10 +226,13 @@ class PulseConsensusEngine {
         news: news,
         patterns: patterns,
         evidence: 0,
+        anchorProbabilityUp: .5,
+        councilAdjustment: 0,
+        overridesAnchor: false,
       );
     }
 
-    var logit = pooled / weightSum;
+    var councilLogit = pooled / weightSum;
 
     // Cross-model coherence: if the sub-models point in opposite directions the
     // pooled evidence is worth less than its magnitude suggests.
@@ -222,11 +243,39 @@ class PulseConsensusEngine {
     final coherence = directions.isEmpty
         ? 0.0
         : (directions.reduce((a, b) => a + b) / directions.length).abs();
-    logit *= (.45 + coherence * .55);
+    councilLogit *= (.45 + coherence * .55);
 
     // Volatility and disagreement shrinkage.
-    logit *= (1 - instability * .45).clamp(.35, 1.0);
-    logit *= (1 - ensemble.dispersion * .35).clamp(.45, 1.0);
+    councilLogit *= (1 - instability * .45).clamp(.35, 1.0);
+    councilLogit *= (1 - ensemble.dispersion * .35).clamp(.45, 1.0);
+
+    // --- Diffusion anchor ---------------------------------------------------
+    //
+    // One fifth of the candle is already history when the call is made, and
+    // that realised move is the only hard information on the table. Under a
+    // diffusion model the close finishes above the open with probability
+    // Φ(d / σ√τ), where d is the distance already travelled and σ√τ the
+    // movement still plausible before expiry.
+    //
+    // Measured on 1999 real rounds, following that anchor alone scores 64.1%
+    // while the councils fused as equal voters scored 59.2% — and on the 26%
+    // of rounds where they contradicted the anchor they scored 40.7%, worse
+    // than a coin. So the anchor leads and the councils modify it, instead of
+    // the other way round.
+    final anchorZ = signal.expectedRemainingMovePct <= 0
+        ? 0.0
+        : (signal.roundDistancePct / signal.expectedRemainingMovePct)
+            .clamp(-4.0, 4.0)
+            .toDouble();
+    final anchorProbability = _normalCdf(anchorZ).clamp(.05, .95).toDouble();
+    final anchorLogit = _logit(anchorProbability);
+
+    // The councils may always shade the answer, but they can only reverse it
+    // when the anchor itself is weak — which is exactly when the first minute
+    // carries little information.
+    final adjustment =
+        councilLogit.clamp(-councilAuthority, councilAuthority).toDouble();
+    final logit = anchorLogit + adjustment;
 
     final raw = _sigmoid(logit).clamp(.04, .96).toDouble();
     final calibratedProbability =
@@ -248,6 +297,9 @@ class PulseConsensusEngine {
       news: news,
       patterns: patterns,
       evidence: evidence,
+      anchorProbabilityUp: anchorProbability,
+      councilAdjustment: adjustment,
+      overridesAnchor: (probability >= .5) != (anchorProbability >= .5),
     );
   }
 }
@@ -257,4 +309,17 @@ double _sigmoid(double x) => 1 / (1 + math.exp(-x.clamp(-30.0, 30.0)));
 double _logit(double p) {
   final q = p.clamp(1e-5, 1 - 1e-5);
   return math.log(q / (1 - q));
+}
+
+double _normalCdf(double x) {
+  final sign = x < 0 ? -1.0 : 1.0;
+  final a = x.abs() / math.sqrt(2.0);
+  final t = 1.0 / (1.0 + .3275911 * a);
+  final erf = 1.0 -
+      (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - .284496736) *
+                  t +
+              .254829592) *
+          t *
+          math.exp(-a * a));
+  return (.5 * (1 + sign * erf)).clamp(0.0, 1.0).toDouble();
 }

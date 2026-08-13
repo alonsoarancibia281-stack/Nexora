@@ -437,6 +437,76 @@ void main() {
     });
   });
 
+  group('diffusion anchor', () {
+    PulseConsensus fuseWith(PulseSignal quantitative, double bias) {
+      final state = PulseEvolutionState.bootstrap();
+      return fusion.fuse(
+        signal: quantitative,
+        ensemble: ensemble.analyze(input(bias), evolution: state),
+        briefing: MathBriefing.neutral(),
+        news: NewsBriefing.empty(),
+        patterns: PatternBriefing.empty(),
+        evolution: state,
+      );
+    }
+
+    PulseSignal travelled(double distancePct) => PulseSignal(
+          direction: PulseDirection.up,
+          score: 10,
+          confidence: 60,
+          momentumScore: 10,
+          trendScore: 8,
+          orderBookImbalance: 0,
+          volumeRatio: 1.1,
+          bodyPressure: 5,
+          instabilityScore: 25,
+          stability: MarketStability.stable,
+          agreementRatio: .6,
+          roundDistancePct: distancePct,
+          expectedRemainingMovePct: .12,
+          reasons: const <String>[],
+        );
+
+    test('the realised move sets the anchor', () {
+      final up = fuseWith(travelled(.20), 0);
+      final down = fuseWith(travelled(-.20), 0);
+      final flat = fuseWith(travelled(0), 0);
+
+      expect(up.anchorProbabilityUp, greaterThan(.85));
+      expect(down.anchorProbabilityUp, lessThan(.15));
+      expect(flat.anchorProbabilityUp, closeTo(.5, 1e-9));
+      expect(up.probabilityUp, greaterThan(down.probabilityUp));
+    });
+
+    test('councils cannot reverse a strong anchor', () {
+      // Price is far above the open; the analysts are told to read bearish.
+      final consensus = fuseWith(travelled(.30), -.9);
+
+      expect(consensus.anchorProbabilityUp, greaterThan(.9));
+      expect(consensus.direction, PulseDirection.up);
+      expect(consensus.overridesAnchor, isFalse);
+      expect(
+        consensus.councilAdjustment.abs(),
+        lessThanOrEqualTo(const PulseConsensusEngine().councilAuthority + 1e-9),
+      );
+    });
+
+    test('councils still decide when the anchor is flat', () {
+      final bullish = fuseWith(travelled(0), .8);
+      final bearish = fuseWith(travelled(0), -.8);
+
+      expect(bullish.probabilityUp, greaterThan(.5));
+      expect(bearish.probabilityUp, lessThan(.5));
+    });
+
+    test('the councils always keep a say', () {
+      final withBull = fuseWith(travelled(.06), .8);
+      final withBear = fuseWith(travelled(.06), -.8);
+
+      expect(withBull.probabilityUp, greaterThan(withBear.probabilityUp));
+    });
+  });
+
   group('round plan', () {
     test('locks a thesis with target and invalidation at the open', () {
       final state = PulseEvolutionState.bootstrap();
