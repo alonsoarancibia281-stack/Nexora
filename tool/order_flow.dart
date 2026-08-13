@@ -233,8 +233,12 @@ class OrderFlowLoader {
     final zip = File('${tempDir.path}/$stamp.zip');
     try {
       stdout.write('  flujo $stamp: descargando…');
+      // A day that has not answered in ninety seconds is not going to: the
+      // dumps normally land in a couple of seconds each, and a five-minute
+      // wait per day turns one slow mirror into an hour of dead run time.
+      final started = DateTime.now();
       final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(minutes: 5));
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 90));
       if (response.statusCode != 200) {
         stdout.writeln(' no disponible (${response.statusCode})');
         return false;
@@ -302,7 +306,8 @@ class OrderFlowLoader {
         for (final entry in dayBuckets.entries)
           '${entry.key}': entry.value.toJson(),
       }));
-      stdout.writeln(' $rows trades → ${dayBuckets.length} tramos');
+      final seconds = DateTime.now().difference(started).inSeconds;
+      stdout.writeln(' $rows trades → ${dayBuckets.length} tramos (${seconds}s)');
       return true;
     } catch (error) {
       stdout.writeln(' error: $error');

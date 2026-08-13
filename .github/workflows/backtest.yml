@@ -50,9 +50,10 @@ jobs:
             ARCHIVE_FLAG="--no-archive"
           fi
           FLOW_DAYS="${{ github.event.inputs.flow_days }}"
-          # El flujo ya es un término del consenso, así que el A/B merece
-          # bastantes más rondas de las que bastaban para descartarlo.
-          FLOW_DAYS="${FLOW_DAYS:-15}"
+          # El flujo ya es un término del consenso, así que el A/B merece más
+          # rondas de las que bastaban para descartarlo. Diez días son unas
+          # 2900 rondas y caben de sobra en el tiempo del job.
+          FLOW_DAYS="${FLOW_DAYS:-10}"
           # Con microestructura la corrida es un A/B sobre las mismas rondas,
           # así que se mide en un único punto de decisión.
           dart run tool/backtest.dart --rounds "$ROUNDS" --flow "$FLOW_DAYS" $ARCHIVE_FLAG | tee backtest-report.txt
