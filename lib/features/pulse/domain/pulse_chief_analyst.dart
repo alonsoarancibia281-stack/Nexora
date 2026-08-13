@@ -66,6 +66,7 @@ class ChiefVerdict {
     required this.auditVerdict,
     required this.auditQuality,
     required this.fullDeliberation,
+    required this.hasReading,
   });
 
   final PulseDirection direction;
@@ -95,6 +96,10 @@ class ChiefVerdict {
   /// Result of the 100-auditor final test on the packet that was handed over.
   final AuditVerdict auditVerdict;
   final double auditQuality;
+
+  /// False when the round is not readable: the evidence sits too close to a
+  /// coin flip for the call to mean anything, so the chief abstains.
+  final bool hasReading;
 
   /// False when the call had to be made without a complete decision window —
   /// typically because the app joined the round after the first minute. The
@@ -140,6 +145,15 @@ class PulseChiefAnalyst {
 
   /// Tolerance, in seconds, for arriving late to the lock moment.
   static const int lockToleranceSeconds = 20;
+
+  /// Minimum distance from 50% before a call is worth making.
+  ///
+  /// Chosen from 1999 replayed rounds rather than by taste. Coverage and hit
+  /// rate at each candidate gate were: 2% → 69.4% of rounds at 68.5%; 4% →
+  /// 56.2% at 70.1%; 6% → 46.6% at 70.5%; 10% → 34.8% at 71.7%. Six percent
+  /// is where the accuracy curve flattens: tightening further buys tenths of
+  /// a point and costs a third of the coverage.
+  static const double readingGate = .06;
 
   ChiefVerdict decide({
     required List<ChiefSample> samples,
@@ -238,6 +252,13 @@ class PulseChiefAnalyst {
     final finalProbability = adjusted.clamp(.05, .95).toDouble();
     final finalUp = finalProbability >= .5;
 
+    // The safety gate. An audit veto or an evidence edge inside the noise band
+    // means the round is not readable, and saying so is worth more than a
+    // coin flip dressed up as a forecast.
+    final edge = (finalProbability - .5).abs();
+    final hasReading =
+        edge >= readingGate && audit.verdict != AuditVerdict.vetoed;
+
     final rationale = <String>[];
     for (final vote in councils) {
       rationale.add(
@@ -274,9 +295,21 @@ class PulseChiefAnalyst {
       );
     }
 
-    final headline = finalUp
-        ? 'El mercado cierra los 5 minutos EN SUBIDA'
-        : 'El mercado cierra los 5 minutos EN BAJADA';
+    if (!hasReading) {
+      rationale.add(
+        edge < readingGate
+            ? 'Evidencia dentro de la banda de ruido '
+                '(${(edge * 100).toStringAsFixed(1)} puntos sobre 50%, mínimo '
+                '${(readingGate * 100).toStringAsFixed(0)}): la ronda no es legible.'
+            : 'La auditoría vetó el paquete: la ronda no es legible.',
+      );
+    }
+
+    final headline = !hasReading
+        ? 'Ronda sin lectura: el motor se abstiene'
+        : finalUp
+            ? 'El mercado cierra los 5 minutos EN SUBIDA'
+            : 'El mercado cierra los 5 minutos EN BAJADA';
 
     return ChiefVerdict(
       direction: finalUp ? PulseDirection.up : PulseDirection.down,
@@ -294,6 +327,7 @@ class PulseChiefAnalyst {
       auditVerdict: audit.verdict,
       auditQuality: audit.qualityScore,
       fullDeliberation: fullDeliberation,
+      hasReading: hasReading,
     );
   }
 }

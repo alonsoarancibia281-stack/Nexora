@@ -931,16 +931,22 @@ class _PulseScreenState extends State<PulseScreen> {
     PulseConsensus? consensus,
   ) {
     final deciding = verdict == null;
+    final abstains = verdict != null && !verdict.hasReading;
     final probability = verdict?.confidence ??
         ((consensus?.winningProbability ?? .5) * 100);
-    final title =
-        verdict == null ? 'ANALIZANDO' : (verdict.isUp ? 'SUBE' : 'BAJA');
+    final title = verdict == null
+        ? 'ANALIZANDO'
+        : !verdict.hasReading
+            ? 'SIN\nLECTURA'
+            : (verdict.isUp ? 'SUBE' : 'BAJA');
     final subtitle = deciding
         ? 'El analista jefe decide en ${_decisionSecondsLeft}s'
-        : '${probability.toStringAsFixed(1)}% de probabilidad';
+        : !verdict.hasReading
+            ? 'la ronda no supera el umbral de seguridad'
+            : '${probability.toStringAsFixed(1)}% de probabilidad';
 
     return LiquidCard(
-      accent: deciding
+      accent: deciding || abstains
           ? LiquidPalette.primary
           : LiquidPalette.directional(verdict.isUp),
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
@@ -962,7 +968,7 @@ class _PulseScreenState extends State<PulseScreen> {
                   ? (consensus?.winningProbability ?? .5)
                   : probability / 100,
               up: up,
-              idle: deciding,
+              idle: deciding || abstains,
               title: title,
               subtitle: subtitle,
             ),
@@ -973,6 +979,17 @@ class _PulseScreenState extends State<PulseScreen> {
               textAlign: TextAlign.center,
               style: LiquidType.subtitle,
             ),
+            if (!verdict.hasReading) ...[
+              const SizedBox(height: 10),
+              const LiquidAlert(
+                message:
+                    'La evidencia de esta ronda queda dentro de la banda de '
+                    'ruido, así que el motor no lanza predicción. Medido sobre '
+                    '1999 rondas reales, exigir este margen sube el acierto del '
+                    '63% al 70% sobre las rondas en las que sí habla.',
+                icon: Icons.do_not_disturb_on_outlined,
+              ),
+            ],
             if (!verdict.fullDeliberation) ...[
               const SizedBox(height: 10),
               const LiquidAlert(

@@ -396,6 +396,54 @@ void main() {
       expect(thin.fullDeliberation, isFalse);
     });
 
+    test('the chief abstains when the edge sits inside the noise band', () {
+      final consensus = buildConsensus();
+      final audit = board.audit(
+        consensus: consensus,
+        signal: signal(),
+        evolution: PulseEvolutionState.bootstrap(),
+        secondsRemaining: 240,
+      );
+      final decidedAt = DateTime.utc(2026, 8, 13, 12, 1);
+
+      ChiefVerdict decide(double probability) => chief.decide(
+            samples: [
+              for (var i = 0; i < 8; i++)
+                ChiefSample(
+                  takenAt: decidedAt,
+                  secondsRemaining: 300 - i * 5,
+                  probabilityUp: probability,
+                  price: 45000,
+                  instability: 25,
+                  ensembleProbability: probability,
+                  mathProbability: probability,
+                  patternProbability: .5,
+                  newsProbability: .5,
+                ),
+            ],
+            consensus: consensus,
+            audit: audit,
+            signal: signal(),
+            entryPrice: 45000,
+            decidedAt: decidedAt,
+            secondsRemaining: PulseChiefAnalyst.lockAtSecondsRemaining,
+          );
+
+      final coinFlip = decide(.505);
+      expect(coinFlip.hasReading, isFalse);
+      expect(coinFlip.headline, contains('sin lectura'));
+      expect(
+        coinFlip.rationale.any((line) => line.contains('no es legible')),
+        isTrue,
+      );
+
+      final decisive = decide(.93);
+      expect((decisive.probabilityUp - .5).abs(),
+          greaterThanOrEqualTo(PulseChiefAnalyst.readingGate));
+      expect(decisive.hasReading, isTrue);
+      expect(decisive.headline, contains('5 minutos'));
+    });
+
     test('unstable deliberation lowers the chief conviction', () {
       final consensus = buildConsensus();
       final audit = board.audit(
