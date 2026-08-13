@@ -934,8 +934,8 @@ class _PulseScreenState extends State<PulseScreen> {
   /// fraction of the candle delivers on its own at each moment, so they are the
   /// floor the engine works from, not a promise.
   Widget _decisionModeSelector() {
-    const options = <int>[60, 180, 270];
-    const labels = <String>['1 min', '3 min', '4½ min'];
+    const options = <int>[60, 180, 240];
+    const labels = <String>['1 min', '3 min', '4 min'];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

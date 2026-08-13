@@ -101,6 +101,19 @@ Future<List<Candle>> loadKlines(
   return [for (final r in all) Candle.fromBinance(r)];
 }
 
+/// Index of the last candle that had already *closed* by [moment].
+///
+/// Filtering on openTime is not enough and the difference is fatal: at 270s
+/// into a round the one-minute candle that opened at 240s does not close until
+/// 300s, and its close *is* the round's close. Using it hands the answer to
+/// the model. Consequence: with one-minute data a decision can only ever use
+/// information up to the last completed minute.
+int lastClosedIndex(List<Candle> candles, DateTime moment, Duration interval) =>
+    lastIndexBefore(
+      candles,
+      moment.subtract(interval).add(const Duration(milliseconds: 1)),
+    );
+
 /// Index of the last candle whose openTime is strictly before [moment].
 int lastIndexBefore(List<Candle> candles, DateTime moment) {
   var lo = 0;
@@ -179,7 +192,9 @@ Future<void> main(List<String> args) async {
           .map((v) => int.tryParse(v.trim()) ?? 60)
           .toList();
     }
-    if (args[i] == '--frontier') decideAt = <int>[60, 120, 180, 240, 270];
+    // Only multiples of 60: with one-minute candles a decision between two
+    // closes carries no more information than the previous close.
+    if (args[i] == '--frontier') decideAt = <int>[60, 120, 180, 240];
   }
 
   stdout.writeln('Descargando historia de Binance…');
@@ -246,9 +261,10 @@ Future<void> evaluate({
     final roundStart = round.openTime.toUtc();
     final decisionMoment = roundStart.add(Duration(seconds: elapsed));
 
-    final minuteIndex = lastIndexBefore(oneMinute, decisionMoment);
+    const minute = Duration(minutes: 1);
+    final minuteIndex = lastClosedIndex(oneMinute, decisionMoment, minute);
     if (minuteIndex < 130) continue;
-    final ethIndex = lastIndexBefore(ethOneMinute, decisionMoment);
+    final ethIndex = lastClosedIndex(ethOneMinute, decisionMoment, minute);
     if (ethIndex < 90) continue;
 
     final candles = oneMinute.sublist(minuteIndex - 119, minuteIndex + 1);
