@@ -103,11 +103,11 @@ class PulseConsensusEngine {
   ///
   /// The rule it encodes is unchanged since it was measured: the councils may
   /// always shade the answer, but may only reverse it while the anchor sits
-  /// between 33% and 67%. Because the anchor now enters shrunk by its fitted
-  /// coefficient, holding that same boundary means shrinking the bound by the
-  /// same factor — 0.70 × 0.48. Left as it was, the councils would inherit an
-  /// authority nobody measured them to deserve, and on the rounds where they
-  /// contradicted the anchor they scored 40.7%.
+  /// between 33% and 67%. Because the anchor enters scaled by its fitted
+  /// coefficient, holding that same boundary means scaling the bound by the
+  /// same factor. Left fixed, the councils would inherit an authority nobody
+  /// measured them to deserve, and on the rounds where they contradicted the
+  /// anchor they scored 40.7%.
   static const double defaultAuthority = .70 * PulseFlowEdge.anchorShrink;
 
   final double councilAuthority;
@@ -283,10 +283,8 @@ class PulseConsensusEngine {
             .toDouble();
     final anchorProbability = _normalCdf(anchorZ).clamp(.05, .95).toDouble();
 
-    // Fitted against 8639 real rounds the anchor's coefficient came out at
-    // 0.7754 ± 0.0266, not 1: the diffusion reading points the right way but
-    // claims more certainty than the outcomes justify. Shrinking it by the
-    // measured factor is a correction, not a tuning knob.
+    // The anchor keeps the share it was fitted to keep once the tape sits
+    // beside it — the two read the same minute, so they split the credit.
     final anchorLogit = _logit(anchorProbability) * PulseFlowEdge.anchorShrink;
 
     // The councils may always shade the answer, but they can only reverse it

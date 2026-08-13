@@ -49,20 +49,24 @@ class PulseFlowEdge {
   //
   // They must be copied together. Price impulse and the anchor measure almost
   // the same thing — the ground covered during the minute that just closed — so
-  // fitted jointly they split the credit, and the anchor lands at 0.48 instead
-  // of the 0.7754 it takes when it is the only term in the model. Pairing the
-  // solo anchor with the joint flow weights would count that minute twice.
-  static const double _wImbalance = .1629;
-  static const double _wImpulse = 1.3077;
-  static const double _wPersistence = .0581;
+  // fitted jointly they split the credit and neither coefficient means anything
+  // without the other. Pairing a solo anchor with joint flow weights would
+  // count that minute twice.
+  static const double _wImbalance = .1287;
+  static const double _wImpulse = 1.0494;
+  static const double _wPersistence = .0671;
 
   /// How much of the anchor's own log-odds survives into the verdict.
   ///
-  /// Well under 1 either way: the diffusion formula points in the right
-  /// direction but claims more certainty than the outcomes grant it. On the
-  /// held-back rounds the recalibration alone moved the log-loss from 0.64068
-  /// to 0.63674, and adding the tape took it to 0.63400.
-  static const double anchorShrink = .4800;
+  /// This used to be 0.48, and the reason was not the anchor: σ came from the
+  /// ATR times a hand-picked constant, and once it became the EWMA of
+  /// one-minute log returns the anchor fitted at 0.9943 ± 0.0336 on its own —
+  /// a probability that can be taken at face value. What is left here is the
+  /// share it keeps when the tape sits beside it, since the two overlap.
+  ///
+  /// On the held-back rounds: anchor alone 63.19% and 0.63458 of log-loss,
+  /// anchor plus tape 64.66% and 0.63246.
+  static const double anchorShrink = .6890;
 
   /// Ceiling on the tape's own contribution, in log-odds.
   ///

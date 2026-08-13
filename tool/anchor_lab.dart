@@ -144,8 +144,11 @@ Future<void> main(List<String> args) async {
       return normalCdf(z).clamp(.05, .95).toDouble();
     }
 
-    // A) What ships today: ATR scaled by a hand-picked constant.
-    anchors['ATR (actual)'] = probability(signal.expectedRemainingMovePct);
+    // A) Whatever the engine is using right now. Once one of the estimators
+    // below is wired in, this row becomes its twin and the pair works as a
+    // check that what shipped is what was measured.
+    anchors['motor (en producción)'] =
+        probability(signal.expectedRemainingMovePct);
 
     // B) The standard deviation of one-minute log returns, EWMA, scaled by the
     // square root of the minutes still to run. No free constants.
