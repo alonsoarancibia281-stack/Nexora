@@ -1,6 +1,13 @@
 name: Backtest
 
 on:
+  # El disparo manual sólo aparece cuando el workflow vive en la rama por
+  # defecto, así que en ramas de trabajo se lanza al tocar el banco de pruebas.
+  push:
+    branches: ['claude/**', 'agent/**']
+    paths:
+      - 'tool/**'
+      - '.github/workflows/backtest.yml'
   workflow_dispatch:
     inputs:
       rounds:
@@ -28,11 +35,13 @@ jobs:
         run: flutter pub get
       - name: Run backtest
         run: |
+          ROUNDS="${{ github.event.inputs.rounds }}"
+          ROUNDS="${ROUNDS:-2000}"
           ARCHIVE_FLAG=""
-          if [ "${{ github.event.inputs.archive }}" != "true" ]; then
+          if [ "${{ github.event.inputs.archive }}" = "false" ]; then
             ARCHIVE_FLAG="--no-archive"
           fi
-          dart run tool/backtest.dart --rounds "${{ github.event.inputs.rounds }}" $ARCHIVE_FLAG | tee backtest-report.txt
+          dart run tool/backtest.dart --rounds "$ROUNDS" $ARCHIVE_FLAG | tee backtest-report.txt
       - name: Publish report in the job summary
         if: always()
         run: |
