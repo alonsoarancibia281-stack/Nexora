@@ -66,6 +66,25 @@ El resultado se sostiene en los tres terciles de volatilidad (69,2% / 67,8% / 70
 
 **Qué produce ese acierto.** Al minuto uno ya se conoce un quinto de la vela. Bajo difusión, el cierre queda por encima de la apertura con probabilidad Φ(d/σ√τ), y seguir sólo esa cantidad acierta el 64,41% —frente al 50,84% de la clase mayoritaria—. El motor completo rinde 64,13%: estadísticamente indistinguible de esa referencia (z = −0,30).
 
-Dicho sin adornos: **el mérito medible es del ancla de difusión y de la puerta de seguridad, no de los 401 agentes.** Los consejos ya no restan —antes de anclarlos perdían casi cinco puntos contra la referencia— pero tampoco suman de forma detectable en klines. La hipótesis viva es que su aporte esté en la microestructura de libro y flujo de órdenes, que la app sí recibe en vivo y el banco de pruebas no puede reconstruir desde velas. Mientras eso no se mida, el `random_walk_guard` y el `cost_benchmark` del propio marco de conocimiento de Nexora los dan por no probados.
+Dicho sin adornos: **el mérito medible es del ancla de difusión y de la puerta de seguridad, no de los 401 agentes.** Los consejos ya no restan —antes de anclarlos perdían casi cinco puntos contra la referencia— pero tampoco suman de forma detectable en klines.
+
+### El flujo de órdenes
+
+`tool/flow_information.dart` reconstruye el tape real desde los volcados diarios de Binance y pregunta lo que el A/B extremo a extremo no podía separar: ¿queda información en la microestructura una vez descontada el ancla? Sobre 8.639 rondas de treinta días, tres features pasan el umbral de Bonferroni —desequilibrio agresor (z = 5,06), impulso de precio (z = 3,39) y persistencia (z = 3,55)— y las cinco de vela salen nulas, porque el ancla ya las absorbe. La prueba conjunta da χ² = 49,09 con 5 g.l. contra un crítico de 11,07.
+
+Ese ajuste se copió al consenso tal cual: el tape entra una vez, con sus coeficientes, y el ancla entra encogida por el suyo. Sobre las 2.592 rondas apartadas del ajuste, la log‑pérdida baja de 0,64068 a 0,63400 y el acierto de 63,19% a 64,58%.
+
+Medido de punta a punta sobre las mismas 2.879 rondas, con y sin ese término:
+
+| | sin flujo | con flujo |
+| --- | --- | --- |
+| Acierto | 63,63% | 63,84% |
+| Brier | 0,23024 | **0,22704** |
+| Cobertura de la puerta | 44,2% | **50,9%** |
+| Acierto con lectura | 69,52% | 69,74% |
+
+Lo que compra el flujo no es acierto bruto —dos décimas, ruido— sino **confianza mejor medida**: con el mismo umbral del 6% el motor se atreve a hablar en la mitad de las rondas en vez de en el 44%, y acierta igual. Ese tramo del backtest cae dentro de la ventana donde se ajustaron los coeficientes; el número limpio es el de la validación apartada.
+
+Lo que sigue sin resolverse: el motor empata con la regla del primer minuto (−0,10 puntos, z = −0,06) y cuando la contradice acierta el 49,51%. Mejor que el 40,72% del que se partía, pero todavía no es aportar. El `random_walk_guard` y el `cost_benchmark` del marco de conocimiento de Nexora siguen dando los 401 agentes por no probados.
 
 > Modelo experimental de uso educativo: no ejecuta operaciones ni garantiza resultados.
