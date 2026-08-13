@@ -49,6 +49,16 @@ El apartado de predicciones funciona como una sala de análisis de **401 agentes
 
 La pestaña **Red neuronal** muestra en vivo el flujo completo —datos, consejos, equipos, auditoría y analista jefe— con el color indicando dirección y el grosor la fuerza de la evidencia.
 
+### Sobre la app de Binance
+
+La sección de predicciones puede quedarse flotando encima de cualquier otra app —la de Binance en particular— con el veredicto expresado como orden (**COMPRAR** / **VENDER** / **ESPERAR**), la probabilidad y la cuenta atrás de la vela. El panel se arrastra a donde estorbe menos y, al tocarlo, devuelve a Nexora. Android exige el permiso «mostrar sobre otras apps», que se concede desde sus ajustes; Nexora arranca la superposición sola al volver.
+
+No lee la pantalla que hay debajo: el análisis sale del mismo feed de mercado de Binance que la app ya recibe.
+
+Desde ahí se puede **vigilar una operación**. Si abres la compra o la venta en el exchange y pulsas *proteger*, Nexora observa el nivel de invalidación de esa ronda y avisa en el acto —panel en rojo, vibración y notificación— cuando el precio lo rompe, cuando el consejo se da la vuelta o cuando la vela se acaba. **Nexora no ejecuta ni cancela órdenes**: no tiene claves de tu cuenta. Vigila y avisa; abrir y cerrar lo haces tú.
+
+El código nativo de Android vive en `android_native/` y `tool/android_wrapper.py` lo integra en el envoltorio que el CI genera con `flutter create`.
+
 ### Validación
 
 El motor se mide con `tool/backtest.dart`, que replica la historia real de Binance ronda a ronda: al minuto uno corre el consejo completo con los datos disponibles en ese instante, emite la llamada y recién después la puntúa contra el cierre. La población aprende tras cada ronda, así que la medición es fuera de muestra.

@@ -754,6 +754,78 @@ class LiquidChip extends StatelessWidget {
   }
 }
 
+/// Primary action of the styleguide: filled pill, white label, soft elevation.
+class LiquidButton extends StatelessWidget {
+  const LiquidButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.color = LiquidPalette.primary,
+    this.outlined = false,
+    this.expand = true,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final IconData? icon;
+  final Color color;
+
+  /// Secondary treatment: hairline border on paper instead of a filled pill.
+  final bool outlined;
+
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final tone = enabled ? color : LiquidPalette.disabled;
+    final foreground = outlined ? tone : Colors.white;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(30),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: outlined ? Colors.transparent : tone,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: outlined ? tone.withValues(alpha: .45) : tone,
+            ),
+            boxShadow: outlined || !enabled
+                ? null
+                : LiquidPalette.elevation(strength: .55),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            child: Row(
+              mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .2,
+                    color: foreground,
+                  ),
+                ),
+                if (icon != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(icon, size: 17, color: foreground),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Alert row with a leading icon, matching the styleguide's alert block.
 class LiquidAlert extends StatelessWidget {
   const LiquidAlert({

@@ -8,6 +8,7 @@ import '../../market/domain/candle.dart';
 import '../data/crypto_news_service.dart';
 import '../data/pulse_ai_service.dart';
 import '../data/pulse_evolution_store.dart';
+import '../data/pulse_overlay.dart';
 import '../domain/btc_5m_logistic_model.dart';
 import '../domain/pulse_ai_consensus.dart';
 import '../domain/pulse_analyst_evolution.dart';
@@ -25,6 +26,7 @@ import '../domain/pulse_probability_calibrator.dart';
 import '../domain/pulse_round_plan.dart';
 import '../domain/pulse_signal.dart';
 import '../domain/pulse_statistical_engine.dart';
+import '../domain/pulse_trade_guard.dart';
 import 'widgets/liquid_neural_network.dart';
 import 'widgets/liquid_widgets.dart';
 
@@ -60,6 +62,7 @@ class _PulseScreenState extends State<PulseScreen> {
   final _newsService = CryptoNewsService();
   final _store = const PulseEvolutionStore();
   final _ai = const PulseAiService();
+  final _overlay = const PulseOverlay();
 
   // Engines
   final _engine = const PulseEngine();
@@ -98,6 +101,14 @@ class _PulseScreenState extends State<PulseScreen> {
   double? _livePrice;
   final List<double> _roundPath = <double>[];
 
+  /// The round is over and the screen is holding the result until the user
+  /// asks for the next one. Without this the exchange stream would wipe the
+  /// outcome the instant the candle closed.
+  bool _holdingResult = false;
+
+  /// Round the exchange already opened while the result was on hold.
+  ({DateTime start, DateTime end, double open})? _pendingRound;
+
   // Councils
   PulseEvolutionState _evolution = PulseEvolutionState.bootstrap();
   PulseSignal? _signal;
@@ -135,6 +146,17 @@ class _PulseScreenState extends State<PulseScreen> {
   String? _error;
   bool _newsLoading = true;
 
+  // Floating readout over other apps
+  bool _overlayOn = false;
+
+  /// Protection over a position the user opened by hand on the exchange.
+  TradeGuard _guard = TradeGuard.off;
+
+  /// The user asked for the overlay and was sent to system settings. Android
+  /// cannot report back, so the next review cycle checks whether the permission
+  /// arrived and starts the panel without a second tap.
+  bool _overlayPending = false;
+
   DateTime get _binanceNow => DateTime.now().toUtc().add(_binanceOffset);
 
   @override
@@ -145,6 +167,8 @@ class _PulseScreenState extends State<PulseScreen> {
 
   Future<void> _bootstrap() async {
     _evolution = await _store.load();
+    // The panel outlives the app process, so it may already be up.
+    _overlayOn = await _overlay.isRunning();
     if (mounted) setState(() {});
 
     await _syncClock();
@@ -158,9 +182,13 @@ class _PulseScreenState extends State<PulseScreen> {
     _clock = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (!mounted) return;
       final end = _roundEnd;
-      if (end != null && !_binanceNow.isBefore(end) && !_liveFeed) {
+      if (end != null &&
+          !_binanceNow.isBefore(end) &&
+          !_liveFeed &&
+          !_holdingResult) {
         _rollRoundFromClock();
       } else {
+        _reviewGuard();
         setState(() {});
       }
     });
@@ -225,9 +253,23 @@ class _PulseScreenState extends State<PulseScreen> {
       _liveFeed = true;
 
       final currentStart = _roundStart;
-      if (currentStart == null ||
+      final isNewRound = currentStart == null ||
           tick.openTime.millisecondsSinceEpoch !=
-              currentStart.millisecondsSinceEpoch) {
+              currentStart.millisecondsSinceEpoch;
+
+      // While the result is held, the exchange keeps streaming the next
+      // candle. Park it instead of letting it overwrite what the user is
+      // still looking at.
+      if (_holdingResult) {
+        if (isNewRound) {
+          _pendingRound =
+              (start: tick.openTime, end: tick.roundEnd, open: tick.open);
+        }
+        setState(() {});
+        return;
+      }
+
+      if (isNewRound) {
         _openRound(tick.openTime, tick.roundEnd, tick.open);
       }
 
@@ -278,6 +320,9 @@ class _PulseScreenState extends State<PulseScreen> {
     _microPrice = null;
     _microAt = null;
     _decisionVotes = const <AnalystVote>[];
+    // A new candle is a new thesis; whatever was being protected belonged to
+    // the previous one.
+    _guard = TradeGuard.off;
     if (entry != null) _appendPath(entry);
     // A new round means a new chart to process: refresh the analog archive so
     // the historical desk studies the window that just closed.
@@ -342,13 +387,37 @@ class _PulseScreenState extends State<PulseScreen> {
       );
     }
 
-    if (mounted) setState(() {});
+    // An armed position has nothing left to ride: the candle it was betting on
+    // is closed.
+    if (_guard.isArmed) {
+      _guard = _guard.evaluate(
+        price: close,
+        probabilityUp: verdict?.probabilityUp ?? .5,
+        secondsRemaining: 0,
+      );
+    }
 
-    // The stream will open the next round on its own; the clock fallback needs
-    // a nudge.
-    if (!_liveFeed) {
+    // The round is scored; hold it on screen. Nothing advances until the user
+    // asks for the next one.
+    _holdingResult = true;
+    _pendingRound = null;
+    if (mounted) setState(() {});
+    unawaited(_pushOverlay());
+  }
+
+  /// Leaves the closed round behind and starts the one the exchange is already
+  /// running.
+  void _advanceRound() {
+    final pending = _pendingRound;
+    _holdingResult = false;
+    _pendingRound = null;
+    if (pending != null) {
+      _openRound(pending.start, pending.end, pending.open);
+      _livePrice = pending.open;
+    } else {
       _alignRoundFromClock();
     }
+    setState(() {});
   }
 
   // ===========================================================================
@@ -395,6 +464,13 @@ class _PulseScreenState extends State<PulseScreen> {
   }
 
   Future<void> _reviewMarket() async {
+    // The round on screen is already scored; there is nothing left to analyse
+    // until the user moves on.
+    if (_holdingResult) {
+      await _pushOverlay();
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _market.loadCandles('BTCUSDT', '1m', limit: 120),
@@ -637,6 +713,9 @@ class _PulseScreenState extends State<PulseScreen> {
         _loading = false;
         _error = null;
       });
+
+      _reviewGuard();
+      unawaited(_pushOverlay());
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -695,6 +774,179 @@ class _PulseScreenState extends State<PulseScreen> {
       _microVotes = votes;
       _microProbability = consensusProbability;
     }
+  }
+
+  // ===========================================================================
+  // Floating readout over other apps
+  // ===========================================================================
+
+  /// The call as an order: what the user would do on the exchange.
+  TradeAction get _action {
+    final verdict = _verdict;
+    if (verdict == null) return TradeAction.wait;
+    return TradeGuard.actionFor(
+      direction: verdict.isUp ? PulseDirection.up : PulseDirection.down,
+      hasReading: verdict.hasReading,
+    );
+  }
+
+  /// Re-reads the armed position against the market. Called on every review
+  /// and on every clock tick, so the alarm does not wait for the next cycle.
+  void _reviewGuard() {
+    if (_guard.state == GuardState.off) return;
+    final price = _livePrice;
+    if (price == null) return;
+    final next = _guard.evaluate(
+      price: price,
+      probabilityUp: _verdict?.probabilityUp ??
+          _consensus?.probabilityUp ??
+          .5,
+      secondsRemaining: _remainingSeconds,
+    );
+    final tripped = next.isTriggered && !_guard.isTriggered;
+    _guard = next;
+    // The alarm cannot wait for the next three-second review: the user is
+    // looking at the exchange, not at this screen.
+    if (tripped) unawaited(_pushOverlay());
+  }
+
+  void _toggleGuard() {
+    if (_guard.state != GuardState.off) {
+      // Both clearing a watch and acknowledging an alarm land here: either way
+      // the position is no longer Nexora's business.
+      setState(() => _guard = TradeGuard.off);
+      unawaited(_pushOverlay());
+      return;
+    }
+    final plan = _plan;
+    final price = _livePrice;
+    if (plan == null || price == null) return;
+    setState(() => _guard = TradeGuard.arm(plan: plan, price: price));
+    unawaited(_pushOverlay());
+  }
+
+  /// What the panel should say right now.
+  PulseOverlayReading _overlayReading() {
+    final verdict = _verdict;
+    final consensus = _consensus;
+    final entry = _entryPrice;
+    final price = _livePrice;
+    final end = _roundEnd;
+
+    if (_holdingResult) {
+      final wentUp = entry != null && price != null && price > entry;
+      return PulseOverlayReading(
+        headline: wentUp ? 'SUBIÓ' : 'BAJÓ',
+        detail: 'ronda cerrada · abre Nexora para la siguiente',
+        probability: 0,
+        up: wentUp,
+        hasReading: false,
+        roundEndsAt: DateTime.now(),
+      );
+    }
+
+    final action = _action;
+    final headline = verdict == null
+        ? 'ANALIZANDO'
+        : !verdict.hasReading
+            ? 'ESPERAR'
+            : (action == TradeAction.buy ? 'COMPRAR' : 'VENDER');
+    final detail = price == null
+        ? 'esperando precio'
+        : entry == null
+            ? 'BTC ${price.toStringAsFixed(2)}'
+            : 'BTC ${price.toStringAsFixed(2)} · apertura '
+                '${entry.toStringAsFixed(2)}';
+
+    return PulseOverlayReading(
+      headline: headline,
+      detail: detail,
+      probability:
+          verdict?.confidence ?? ((consensus?.winningProbability ?? .5) * 100),
+      up: verdict?.isUp ?? ((consensus?.probabilityUp ?? .5) >= .5),
+      hasReading: verdict?.hasReading ?? false,
+      // The panel counts down on its own, so it needs the deadline on the
+      // device clock rather than the exchange's.
+      roundEndsAt: (end ?? _binanceNow).subtract(_binanceOffset),
+      guard: switch (_guard.state) {
+        GuardState.off => OverlayGuard.off,
+        GuardState.armed => OverlayGuard.armed,
+        GuardState.triggered => OverlayGuard.triggered,
+      },
+      guardDetail: _guardDetail(),
+      actionLabel: _guardButtonLabel(),
+    );
+  }
+
+  String _guardDetail() => switch (_guard.state) {
+        GuardState.off => '',
+        GuardState.armed => 'protegida desde '
+            '${_guard.entryPrice.toStringAsFixed(2)} · sale en '
+            '${_guard.invalidationPrice.toStringAsFixed(2)}',
+        GuardState.triggered => '${_guard.reasonLabel} · '
+            '−${_guard.adversePct.toStringAsFixed(3)}%',
+      };
+
+  String _guardButtonLabel() {
+    if (_holdingResult) return '';
+    return switch (_guard.state) {
+      GuardState.off => _plan == null ? '' : 'PROTEGER OPERACIÓN',
+      GuardState.armed => 'QUITAR PROTECCIÓN',
+      GuardState.triggered => 'HECHO, YA CERRÉ',
+    };
+  }
+
+  Future<void> _pushOverlay() async {
+    if (!_overlay.isSupported) return;
+
+    if (_overlayPending && !_overlayOn) {
+      // Back from the settings screen: start without asking for a second tap.
+      if (await _overlay.hasPermission()) {
+        final started = await _overlay.start(_overlayReading());
+        if (!mounted) return;
+        setState(() {
+          _overlayOn = started;
+          _overlayPending = !started;
+        });
+        return;
+      }
+    }
+
+    if (!_overlayOn) return;
+    final tapped = await _overlay.update(_overlayReading());
+    if (tapped == 'toggle' && mounted) {
+      _toggleGuard();
+    }
+  }
+
+  Future<void> _toggleOverlay() async {
+    if (_overlayOn) {
+      await _overlay.stop();
+      if (!mounted) return;
+      setState(() {
+        _overlayOn = false;
+        _overlayPending = false;
+      });
+      return;
+    }
+
+    var granted = await _overlay.hasPermission();
+    if (!granted) {
+      // Opens the system screen; Android never grants this from inside the app.
+      granted = await _overlay.requestPermission();
+      if (!granted) {
+        if (!mounted) return;
+        setState(() => _overlayPending = true);
+        return;
+      }
+    }
+
+    final started = await _overlay.start(_overlayReading());
+    if (!mounted) return;
+    setState(() {
+      _overlayOn = started;
+      _overlayPending = !started;
+    });
   }
 
   // ===========================================================================
@@ -845,6 +1097,14 @@ class _PulseScreenState extends State<PulseScreen> {
       const SizedBox(height: 14),
       _verdictCard(up, verdict, consensus),
       const SizedBox(height: 14),
+      if (!_holdingResult) ...[
+        _guardCard(),
+        const SizedBox(height: 14),
+      ],
+      if (_overlay.isSupported) ...[
+        _overlayCard(),
+        const SizedBox(height: 14),
+      ],
       if (plan != null) ...[
         _strategyCard(plan, tracking),
         const SizedBox(height: 14),
@@ -878,6 +1138,7 @@ class _PulseScreenState extends State<PulseScreen> {
   }
 
   Widget _countdownCard() {
+    if (_holdingResult) return _roundClosedCard();
     final decisionPhase = _deciding && _remainingSeconds > 0;
     return LiquidCard(
       child: Column(
@@ -933,6 +1194,306 @@ class _PulseScreenState extends State<PulseScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Protection over a position the user opened by hand on the exchange.
+  Widget _guardCard() {
+    final plan = _plan;
+    final triggered = _guard.isTriggered;
+    final armed = _guard.isArmed;
+    final action = _action;
+    final tone = triggered
+        ? LiquidPalette.fall
+        : armed
+            ? LiquidPalette.rise
+            : LiquidPalette.primary;
+
+    return LiquidCard(
+      accent: triggered || armed ? tone : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('LA OPERACIÓN', style: LiquidType.micro),
+              LiquidChip(
+                label: triggered
+                    ? 'CIERRA AHORA'
+                    : armed
+                        ? 'PROTEGIDA'
+                        : action == TradeAction.wait
+                            ? 'SIN SEÑAL'
+                            : _guard.actionLabel,
+                color: tone,
+                icon: triggered
+                    ? Icons.report_gmailerrorred
+                    : armed
+                        ? Icons.shield_outlined
+                        : Icons.trending_flat,
+                dense: true,
+                filled: triggered,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (triggered) ...[
+            Text(
+              'CIERRA AHORA',
+              style: LiquidType.title.copyWith(color: LiquidPalette.fall),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${_guard.reasonLabel}. En contra '
+              '${_guard.adversePct.toStringAsFixed(3)}% desde '
+              '${_guard.entryPrice.toStringAsFixed(2)}.',
+              style: LiquidType.caption,
+            ),
+          ] else if (armed) ...[
+            Text(
+              _guard.action == TradeAction.buy
+                  ? 'Compra vigilada'
+                  : 'Venta vigilada',
+              style: LiquidType.subtitle,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Entrada ${_guard.entryPrice.toStringAsFixed(2)} · aviso si el '
+              'precio ${_guard.action == TradeAction.buy ? 'cae por debajo de' : 'sube por encima de'} '
+              '${_guard.invalidationPrice.toStringAsFixed(2)}, o si el consejo '
+              'se da la vuelta. Ahora mismo en contra '
+              '${_guard.adversePct.toStringAsFixed(3)}%.',
+              style: LiquidType.caption,
+            ),
+          ] else ...[
+            Text(
+              plan == null
+                  ? 'En cuanto el jefe fije la llamada, aquí aparece la acción '
+                      'y podrás vigilarla.'
+                  : action == TradeAction.wait
+                      ? 'Esta ronda no supera el umbral de seguridad: el '
+                          'consejo recomienda no entrar.'
+                      : 'Si abres esta ${action == TradeAction.buy ? 'compra' : 'venta'} '
+                          'en Binance, Nexora vigila el nivel que la invalida y '
+                          'te avisa en el acto —también sobre la app de Binance— '
+                          'para que la cierres antes de que duela.',
+              style: LiquidType.caption,
+            ),
+          ],
+          const SizedBox(height: 12),
+          LiquidButton(
+            label: triggered
+                ? 'HECHO, YA CERRÉ'
+                : armed
+                    ? 'QUITAR PROTECCIÓN'
+                    : 'PROTEGER OPERACIÓN',
+            icon: triggered
+                ? Icons.check
+                : armed
+                    ? Icons.shield_moon_outlined
+                    : Icons.shield_outlined,
+            color: tone,
+            outlined: armed,
+            onPressed: (plan == null || action == TradeAction.wait) && !armed &&
+                    !triggered
+                ? null
+                : _toggleGuard,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Nexora no ejecuta ni cancela órdenes: no tiene claves de tu cuenta '
+            'de Binance. Vigila el mercado y te dice cuándo salir; abrir y '
+            'cerrar lo haces tú.',
+            style: LiquidType.caption.copyWith(
+              fontSize: 10.5,
+              color: LiquidPalette.inkFaint,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Control for the floating readout that sits on top of the trading app.
+  Widget _overlayCard() => LiquidCard(
+        accent: _overlayOn ? LiquidPalette.primary : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('SUPERPOSICIÓN', style: LiquidType.micro),
+                LiquidChip(
+                  label: _overlayOn
+                      ? 'ACTIVA'
+                      : _overlayPending
+                          ? 'FALTA PERMISO'
+                          : 'APAGADA',
+                  color: _overlayOn
+                      ? LiquidPalette.rise
+                      : _overlayPending
+                          ? LiquidPalette.primary
+                          : LiquidPalette.inkFaint,
+                  icon: _overlayOn
+                      ? Icons.picture_in_picture_alt
+                      : Icons.layers_outlined,
+                  dense: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Deja el veredicto y la cuenta atrás flotando sobre Binance '
+              'mientras miras el gráfico allí. Se arrastra a donde quieras y, '
+              'al tocarlo, vuelves a Nexora.',
+              style: LiquidType.caption,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'No lee la pantalla de Binance: el análisis sale del mismo mercado '
+              'que Nexora ya recibe en vivo.',
+              style: LiquidType.caption.copyWith(
+                fontSize: 10.5,
+                color: LiquidPalette.inkFaint,
+              ),
+            ),
+            const SizedBox(height: 12),
+            LiquidButton(
+              label: _overlayOn
+                  ? 'QUITAR DE LA PANTALLA'
+                  : 'SUPERPONER SOBRE BINANCE',
+              icon: _overlayOn ? Icons.close : Icons.open_in_new,
+              outlined: _overlayOn,
+              onPressed: _toggleOverlay,
+            ),
+            if (_overlayPending) ...[
+              const SizedBox(height: 10),
+              const LiquidAlert(
+                message:
+                    'Android pide el permiso «mostrar sobre otras apps» desde '
+                    'sus ajustes. Concédeselo a Nexora y la superposición '
+                    'arranca sola al volver.',
+                tone: LiquidPalette.primary,
+                icon: Icons.settings_outlined,
+              ),
+            ],
+          ],
+        ),
+      );
+
+  /// What the round did, held on screen until the user asks for the next one.
+  Widget _roundClosedCard() {
+    // Only the outcome of the round on screen; an older one would report a
+    // hit that belongs to a different candle.
+    final latest = _outcomes.isEmpty ? null : _outcomes.first;
+    final settled = latest != null &&
+            _roundStart != null &&
+            latest.roundStart.millisecondsSinceEpoch ==
+                _roundStart!.millisecondsSinceEpoch
+        ? latest
+        : null;
+    final entry = _entryPrice;
+    final close = _livePrice;
+    final wentUp = entry != null && close != null && close > entry;
+    final hit = settled?.hit;
+    final waiting = _pendingRound == null;
+
+    return LiquidCard(
+      accent: hit == null
+          ? LiquidPalette.inkFaint
+          : (hit ? LiquidPalette.rise : LiquidPalette.fall),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('RONDA CERRADA', style: LiquidType.micro),
+              LiquidChip(
+                label: hit == null
+                    ? 'SIN LLAMADA'
+                    : (hit ? 'ACERTÓ' : 'FALLÓ'),
+                color: hit == null
+                    ? LiquidPalette.inkFaint
+                    : (hit ? LiquidPalette.rise : LiquidPalette.fall),
+                icon: hit == null
+                    ? Icons.remove
+                    : (hit ? Icons.check_circle_outline : Icons.cancel_outlined),
+                dense: true,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Icon(
+                wentUp ? Icons.trending_up : Icons.trending_down,
+                size: 34,
+                color: LiquidPalette.directional(wentUp),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                wentUp ? 'SUBIÓ' : 'BAJÓ',
+                style: TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -1.2,
+                  height: 1,
+                  color: LiquidPalette.directional(wentUp),
+                ),
+              ),
+              const Spacer(),
+              if (settled != null)
+                Text(
+                  '${settled.movePct >= 0 ? '+' : ''}'
+                  '${settled.movePct.toStringAsFixed(3)}%',
+                  style: LiquidType.subtitle.copyWith(
+                    color: LiquidPalette.directional(settled.movePct >= 0),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                entry == null
+                    ? 'Apertura —'
+                    : 'Apertura ${entry.toStringAsFixed(2)}',
+                style: LiquidType.caption,
+              ),
+              Text(
+                close == null
+                    ? 'Cierre —'
+                    : 'Cierre ${close.toStringAsFixed(2)}',
+                style: LiquidType.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: LiquidPalette.ink,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          LiquidButton(
+            label: waiting ? 'ESPERANDO LA SIGUIENTE VELA' : 'SIGUIENTE RONDA',
+            icon: waiting ? Icons.hourglass_empty : Icons.arrow_forward,
+            onPressed: waiting ? null : _advanceRound,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            waiting
+                ? 'El consejo ya aprendió de esta ronda. En cuanto Binance abra '
+                    'la siguiente vela, el botón se activa.'
+                : 'Binance ya abrió la siguiente vela. El consejo empieza de '
+                    'cero en cuanto pulses.',
+            style: LiquidType.caption.copyWith(fontSize: 10.5),
           ),
         ],
       ),
@@ -2137,6 +2698,8 @@ class _PulseScreenState extends State<PulseScreen> {
     _historyTimer?.cancel();
     _syncTimer?.cancel();
     _klineSubscription?.cancel();
+    // Nothing is feeding the panel once this screen is gone.
+    if (_overlayOn) unawaited(_overlay.stop());
     unawaited(_store.save(_evolution));
     super.dispose();
   }
