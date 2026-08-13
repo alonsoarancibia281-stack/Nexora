@@ -130,6 +130,8 @@ class RoundResult {
     required this.stability,
     required this.dissent,
     required this.vetoed,
+    required this.firstMinuteUp,
+    required this.firstMinutePct,
   });
 
   final DateTime roundStart;
@@ -142,7 +144,14 @@ class RoundResult {
   final double dissent;
   final bool vetoed;
 
+  /// Direction of the first minute — the part of the candle already realised
+  /// when the call is made. This is the benchmark that actually matters.
+  final bool firstMinuteUp;
+  final double firstMinutePct;
+
   bool get hit => predictedUp == actualUp;
+  bool get baselineHit => firstMinuteUp == actualUp;
+  bool get agreesWithBaseline => predictedUp == firstMinuteUp;
   double get edge => (probabilityUp - .5).abs();
 }
 
@@ -207,9 +216,9 @@ Future<void> main(List<String> args) async {
     if (useArchive && (i - firstRound) % 12 == 0) {
       patterns = archive.study(PatternHistory(series: <String, List<Candle>>{
         '5m': fiveMinute.sublist(math.max(0, i - 900), i),
-        '1h': _sliceBefore(hourly, roundStart, 900),
-        '4h': _sliceBefore(fourHour, roundStart, 900),
-        '1d': _sliceBefore(daily, roundStart, 900),
+        '1h': _sliceBefore(hourly, roundStart, 900, const Duration(hours: 1)),
+        '4h': _sliceBefore(fourHour, roundStart, 900, const Duration(hours: 4)),
+        '1d': _sliceBefore(daily, roundStart, 900, const Duration(days: 1)),
       }));
     }
 
@@ -319,6 +328,7 @@ Future<void> main(List<String> args) async {
     );
 
     final actualUp = round.close > round.open;
+    final priceAtDecision = candles.last.close;
     results.add(RoundResult(
       roundStart: roundStart,
       probabilityUp: verdict.probabilityUp,
@@ -329,6 +339,8 @@ Future<void> main(List<String> args) async {
       stability: verdict.stability,
       dissent: verdict.dissent,
       vetoed: audit.verdict == AuditVerdict.vetoed,
+      firstMinuteUp: priceAtDecision > entry,
+      firstMinutePct: (priceAtDecision - entry) / entry * 100,
     ));
 
     // Predict first, then learn: this keeps every measurement out of sample.
@@ -350,9 +362,21 @@ Future<void> main(List<String> args) async {
   report(results, DateTime.now().difference(started));
 }
 
-List<Candle> _sliceBefore(List<Candle> candles, DateTime moment, int max) {
+/// Candles that had already *closed* by [moment].
+///
+/// Filtering on openTime alone is not enough: the hourly candle that opened
+/// twenty minutes ago closes forty minutes into the future, and its high, low
+/// and close are future information. Feeding that to the archive would leak
+/// the answer into the question.
+List<Candle> _sliceBefore(
+  List<Candle> candles,
+  DateTime moment,
+  int max,
+  Duration interval,
+) {
   if (candles.isEmpty) return const <Candle>[];
-  final index = lastIndexBefore(candles, moment);
+  final cutoff = moment.subtract(interval);
+  final index = lastIndexBefore(candles, cutoff.add(const Duration(milliseconds: 1)));
   if (index < 0) return const <Candle>[];
   final start = math.max(0, index + 1 - max);
   return candles.sublist(start, index + 1);
@@ -387,28 +411,71 @@ void report(List<RoundResult> results, Duration elapsed) {
       '${results.last.roundStart.toIso8601String()}');
   stdout.writeln('Tiempo de cómputo ......... ${elapsed.inSeconds}s');
   stdout.writeln('');
-  stdout.writeln('Acierto ................... '
+  final baselineHits = results.where((r) => r.baselineHit).length;
+  final baselineAccuracy = baselineHits / n;
+  // Excess over the first-minute rule, with its own binomial test.
+  final excess = accuracy - baselineAccuracy;
+  final excessZ = (hits - baselineHits) / math.sqrt(n.toDouble());
+
+  stdout.writeln('Acierto del motor ......... '
       '${(accuracy * 100).toStringAsFixed(2)}%');
-  stdout.writeln('Tasa base (clase mayor) ... '
-      '${(baseRate * 100).toStringAsFixed(2)}%');
   stdout.writeln('Brier ..................... ${brier.toStringAsFixed(5)} '
       '(0.25 = moneda)');
   stdout.writeln('z contra moneda ........... ${z.toStringAsFixed(2)} '
       '${z.abs() > 1.96 ? '(significativo)' : '(NO significativo)'}');
+  stdout.writeln('');
+  stdout.writeln('REFERENCIAS — el rival correcto no es la moneda:');
+  stdout.writeln('  Clase mayoritaria ....... '
+      '${(baseRate * 100).toStringAsFixed(2)}%');
+  stdout.writeln('  Dirección del 1er minuto  '
+      '${(baselineAccuracy * 100).toStringAsFixed(2)}%  ← regla trivial');
+  stdout.writeln('  Ventaja del motor ....... '
+      '${(excess * 100).toStringAsFixed(2)} puntos  '
+      '(z=${excessZ.toStringAsFixed(2)})');
+  stdout.writeln('');
+  stdout.writeln('  Al minuto 1 ya se conoce un quinto de la vela: si los');
+  stdout.writeln('  retornos fuesen ruido puro, seguir el primer minuto');
+  stdout.writeln('  acertaría 1/2 + arcsin(1/√5)/π = 64.76%. Batir a la moneda');
+  stdout.writeln('  no significa nada; hay que batir a esa regla.');
+
+  final agree = results.where((r) => r.agreesWithBaseline).toList();
+  final disagree = results.where((r) => !r.agreesWithBaseline).toList();
+  stdout.writeln('');
+  stdout.writeln('Dónde aporta (o resta) el motor:');
+  if (agree.isNotEmpty) {
+    final agreeHits = agree.where((r) => r.hit).length;
+    stdout.writeln('  Coincide con el 1er minuto  '
+        '${agree.length.toString().padLeft(5)} rondas  '
+        '${(agreeHits / agree.length * 100).toStringAsFixed(2)}%');
+  }
+  if (disagree.isNotEmpty) {
+    final disagreeHits = disagree.where((r) => r.hit).length;
+    final disagreeZ =
+        (disagreeHits - disagree.length / 2) / math.sqrt(disagree.length / 4);
+    stdout.writeln('  Contradice al 1er minuto    '
+        '${disagree.length.toString().padLeft(5)} rondas  '
+        '${(disagreeHits / disagree.length * 100).toStringAsFixed(2)}%  '
+        '(z=${disagreeZ.toStringAsFixed(2)})');
+    stdout.writeln('  → por debajo del 50% en esta fila, el motor está');
+    stdout.writeln('    destruyendo información en vez de aportarla.');
+  }
 
   stdout.writeln('\nAcierto por umbral de convicción (puerta de seguridad):');
-  stdout.writeln('  umbral   rondas   cobertura   acierto   z');
+  stdout.writeln('  umbral   rondas   cobertura   acierto   1er min   z');
   for (final gate in <double>[0, .02, .04, .06, .08, .10, .12, .15, .20]) {
     final subset = results.where((r) => r.edge >= gate).toList();
     if (subset.length < 20) continue;
     final subsetHits = subset.where((r) => r.hit).length;
     final subsetAccuracy = subsetHits / subset.length;
+    final subsetBaseline =
+        subset.where((r) => r.baselineHit).length / subset.length;
     final subsetZ =
         (subsetHits - subset.length / 2) / math.sqrt(subset.length / 4);
     stdout.writeln('  ${(gate * 100).toStringAsFixed(0).padLeft(4)}%   '
         '${subset.length.toString().padLeft(6)}   '
         '${(subset.length / n * 100).toStringAsFixed(1).padLeft(8)}%   '
         '${(subsetAccuracy * 100).toStringAsFixed(2).padLeft(6)}%   '
+        '${(subsetBaseline * 100).toStringAsFixed(2).padLeft(8)}%   '
         '${subsetZ.toStringAsFixed(2).padLeft(5)}');
   }
 
