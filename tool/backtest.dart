@@ -132,6 +132,8 @@ class RoundResult {
     required this.vetoed,
     required this.firstMinuteUp,
     required this.firstMinutePct,
+    required this.hasReading,
+    required this.expectedMovePct,
   });
 
   final DateTime roundStart;
@@ -148,6 +150,13 @@ class RoundResult {
   /// when the call is made. This is the benchmark that actually matters.
   final bool firstMinuteUp;
   final double firstMinutePct;
+
+  /// Whether the shipped safety gate let the call through.
+  final bool hasReading;
+
+  /// Movement the models expected over the rest of the round: the volatility
+  /// regime this round belongs to.
+  final double expectedMovePct;
 
   bool get hit => predictedUp == actualUp;
   bool get baselineHit => firstMinuteUp == actualUp;
@@ -341,6 +350,8 @@ Future<void> main(List<String> args) async {
       vetoed: audit.verdict == AuditVerdict.vetoed,
       firstMinuteUp: priceAtDecision > entry,
       firstMinutePct: (priceAtDecision - entry) / entry * 100,
+      hasReading: verdict.hasReading,
+      expectedMovePct: signal.expectedRemainingMovePct,
     ));
 
     // Predict first, then learn: this keeps every measurement out of sample.
@@ -502,6 +513,75 @@ void report(List<RoundResult> results, Duration elapsed) {
         '${(hi * 100).toStringAsFixed(0).padLeft(3)}%  '
         '${subset.length.toString().padLeft(6)} rondas  →  '
         'subió el ${(realized * 100).toStringAsFixed(1)}%');
+  }
+
+  // --- The gate as actually shipped ----------------------------------------
+  final spoken = results.where((r) => r.hasReading).toList();
+  final silent = results.where((r) => !r.hasReading).toList();
+  stdout.writeln('\nPuerta de seguridad tal como va en la app '
+      '(margen ≥ ${(PulseChiefAnalyst.readingGate * 100).toStringAsFixed(0)}%):');
+  if (spoken.isNotEmpty) {
+    final spokenHits = spoken.where((r) => r.hit).length;
+    final spokenBaseline = spoken.where((r) => r.baselineHit).length;
+    final spokenZ = (spokenHits - spoken.length / 2) / math.sqrt(spoken.length / 4);
+    stdout.writeln('  Con lectura   ${spoken.length.toString().padLeft(6)} rondas  '
+        '${(spoken.length / n * 100).toStringAsFixed(1).padLeft(5)}%  '
+        'acierto ${(spokenHits / spoken.length * 100).toStringAsFixed(2)}%  '
+        '1er min ${(spokenBaseline / spoken.length * 100).toStringAsFixed(2)}%  '
+        'z=${spokenZ.toStringAsFixed(2)}');
+  }
+  if (silent.isNotEmpty) {
+    final silentHits = silent.where((r) => r.hit).length;
+    stdout.writeln('  Sin lectura   ${silent.length.toString().padLeft(6)} rondas  '
+        '${(silent.length / n * 100).toStringAsFixed(1).padLeft(5)}%  '
+        'habrían acertado ${(silentHits / silent.length * 100).toStringAsFixed(2)}%');
+  }
+
+  // --- Stability across volatility regimes ---------------------------------
+  final byVolatility = [...results]
+    ..sort((a, b) => a.expectedMovePct.compareTo(b.expectedMovePct));
+  stdout.writeln('\nPor régimen de volatilidad (terciles del movimiento esperado):');
+  const regimeNames = <String>['baja    ', 'media   ', 'alta    '];
+  for (var tercile = 0; tercile < 3; tercile++) {
+    final from = (byVolatility.length * tercile) ~/ 3;
+    final to = (byVolatility.length * (tercile + 1)) ~/ 3;
+    final subset = byVolatility.sublist(from, to);
+    if (subset.length < 30) continue;
+    final subsetHits = subset.where((r) => r.hit).length;
+    final subsetBaseline = subset.where((r) => r.baselineHit).length;
+    final subsetSpoken = subset.where((r) => r.hasReading).toList();
+    final spokenAccuracy = subsetSpoken.isEmpty
+        ? 0.0
+        : subsetSpoken.where((r) => r.hit).length / subsetSpoken.length;
+    stdout.writeln('  ${regimeNames[tercile]} '
+        '${subset.length.toString().padLeft(6)} rondas  '
+        'motor ${(subsetHits / subset.length * 100).toStringAsFixed(2)}%  '
+        '1er min ${(subsetBaseline / subset.length * 100).toStringAsFixed(2)}%  '
+        'con lectura ${(spokenAccuracy * 100).toStringAsFixed(2)}% '
+        '(${subsetSpoken.length})');
+  }
+
+  // --- Stability across time -----------------------------------------------
+  stdout.writeln('\nPor tramo temporal (¿aguanta fuera de una sola semana?):');
+  const segments = 6;
+  for (var segment = 0; segment < segments; segment++) {
+    final from = (n * segment) ~/ segments;
+    final to = (n * (segment + 1)) ~/ segments;
+    final subset = results.sublist(from, to);
+    if (subset.length < 30) continue;
+    final subsetHits = subset.where((r) => r.hit).length;
+    final subsetBaseline = subset.where((r) => r.baselineHit).length;
+    final subsetSpoken = subset.where((r) => r.hasReading).toList();
+    final spokenAccuracy = subsetSpoken.isEmpty
+        ? 0.0
+        : subsetSpoken.where((r) => r.hit).length / subsetSpoken.length;
+    final label = subset.first.roundStart.toIso8601String().substring(0, 10);
+    stdout.writeln('  desde $label  '
+        '${subset.length.toString().padLeft(6)} rondas  '
+        'motor ${(subsetHits / subset.length * 100).toStringAsFixed(2)}%  '
+        '1er min ${(subsetBaseline / subset.length * 100).toStringAsFixed(2)}%  '
+        'con lectura ${(spokenAccuracy * 100).toStringAsFixed(2)}% '
+        '(${subsetSpoken.length})');
   }
 
   final vetoed = results.where((r) => r.vetoed).toList();
