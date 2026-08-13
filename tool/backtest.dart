@@ -543,6 +543,11 @@ void report(
   stdout.writeln('Tiempo de cómputo ......... ${elapsed.inSeconds}s');
   stdout.writeln('Decisión a los ............ ${chief.decisionWindowSeconds}s '
       '(techo mecánico ${(chief.mechanicalCeiling * 100).toStringAsFixed(2)}%)');
+  final usableSeconds = (chief.decisionWindowSeconds ~/ 60) * 60;
+  stdout.writeln('Datos disponibles hasta ... ${usableSeconds}s'
+      '${usableSeconds == chief.decisionWindowSeconds ? '' : ' ← las velas de 1 min no llegan más lejos'}');
+  stdout.writeln('Microestructura ........... '
+      '${flowAvailable ? 'flujo real del tape en $flowRounds rondas' : 'neutralizada'}');
   stdout.writeln('');
   final baselineHits = results.where((r) => r.baselineHit).length;
   final baselineAccuracy = baselineHits / n;
