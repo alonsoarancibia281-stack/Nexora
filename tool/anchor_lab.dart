@@ -360,7 +360,20 @@ void informationReport(List<Row> rows, String anchorName) {
     return;
   }
 
-  productionReport(rows, anchorName, winners, baseline);
+  // Passing the threshold one at a time is not the same as deserving a seat
+  // together. The tape readings over 30, 60 and 120 seconds are three views of
+  // one thing, and thrown into the same fit they trade signs and inflate each
+  // other's errors. So two models get built and checked out of sample: the
+  // three readings of the one-minute window, which is what ships today, and
+  // everything that survived, which is what a naive reading of the table would
+  // suggest.
+  const parsimonious = <String>[
+    'flujo·desequilibrio 60s',
+    'flujo·impulso 60s',
+    'flujo·persistencia 60s',
+  ];
+  productionReport(rows, anchorName, parsimonious, baseline, 'ventana de 60s');
+  productionReport(rows, anchorName, winners, baseline, 'todo lo significativo');
 }
 
 /// The model as it would ship, checked on rounds the fit never saw.
@@ -369,6 +382,7 @@ void productionReport(
   String anchorName,
   List<String> winners,
   LogitFit baseline,
+  String label,
 ) {
   final n = rows.length;
   final split = (n * .7).round();
@@ -391,7 +405,7 @@ void productionReport(
   final full = fitLogistic(design(train, withFlow: true), yTrain);
 
   stdout.writeln('\n${'=' * 78}');
-  stdout.writeln('MODELO DE PRODUCCIÓN · «$anchorName» + lo que sobrevivió');
+  stdout.writeln('MODELO DE PRODUCCIÓN · «$anchorName» + $label');
   stdout.writeln('=' * 78);
   stdout.writeln('Ajuste sobre $split rondas, validación sobre ${test.length}.');
   stdout.writeln('');
