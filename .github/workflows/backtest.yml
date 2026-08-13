@@ -35,6 +35,8 @@ jobs:
         run: flutter pub get
       - name: Run backtest
         run: |
+          # Without pipefail the exit status of `tee` would hide a crash.
+          set -o pipefail
           ROUNDS="${{ github.event.inputs.rounds }}"
           ROUNDS="${ROUNDS:-2000}"
           ARCHIVE_FLAG=""

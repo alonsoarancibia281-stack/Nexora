@@ -308,9 +308,12 @@ class PulseEvolutionState {
 /// Online learning plus genetic evolution for the 100 analysts.
 ///
 /// Learning happens on two clocks:
-///  * every continuous market review (a short intra-round horizon check) with
-///    reduced intensity, so the population keeps adapting while a round runs;
-///  * every closed 5-minute round with full intensity.
+///  * every continuous market review, scoring the population against the move
+///    that happened since the previous review. This is a *proxy*: the analysts
+///    are forecasting a 5-minute close, not a 30-second wiggle, so these
+///    updates run at low intensity and never touch the calibration.
+///  * every closed 5-minute round, at full intensity, against the outcome the
+///    analysts were actually asked to predict. This is the update that counts.
 ///
 /// Once enough experience accumulates, the weakest analysts are replaced by
 /// crossover children of the elite, which is what makes the population evolve
@@ -407,18 +410,26 @@ class PulseEvolutionEngine {
     }
 
     // Online Platt calibration on the fused consensus.
+    //
+    // Only closed rounds may touch it. The calibration answers one specific
+    // question — "when this engine says 62%, how often does the 5-minute
+    // candle actually close up?" — and feeding it 30-second outcomes would fit
+    // it to a different horizon entirely, which is worse than not fitting it.
+    var slope = state.calibrationSlope;
+    var intercept = state.calibrationIntercept;
     final raw = consensusProbabilityUp.clamp(1e-4, 1 - 1e-4).toDouble();
-    final logit = math.log(raw / (1 - raw));
-    final z = state.calibrationSlope * logit + state.calibrationIntercept;
-    final q = 1 / (1 + math.exp(-z.clamp(-30.0, 30.0)));
-    final gradient = (q - y) * k;
-    final slope =
-        (state.calibrationSlope - calibrationRate * gradient * logit)
-            .clamp(.25, 2.6)
-            .toDouble();
-    final intercept = (state.calibrationIntercept - calibrationRate * gradient)
-        .clamp(-1.0, 1.0)
-        .toDouble();
+    if (closedRound) {
+      final logit = math.log(raw / (1 - raw));
+      final z = slope * logit + intercept;
+      final q = 1 / (1 + math.exp(-z.clamp(-30.0, 30.0)));
+      final gradient = (q - y) * k;
+      slope = (slope - calibrationRate * gradient * logit)
+          .clamp(.25, 2.6)
+          .toDouble();
+      intercept = (intercept - calibrationRate * gradient)
+          .clamp(-1.0, 1.0)
+          .toDouble();
+    }
 
     final consensusBrier = closedRound
         ? state.consensusBrier * .94 + math.pow(raw - y, 2).toDouble() * .06

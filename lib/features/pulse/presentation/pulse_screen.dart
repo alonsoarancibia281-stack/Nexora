@@ -114,6 +114,11 @@ class _PulseScreenState extends State<PulseScreen> {
 
   // Learning
   List<AnalystVote> _lastVotes = const <AnalystVote>[];
+
+  /// Votes captured at the instant the chief locked the call. These — not the
+  /// late-round opinions, which have already seen most of the move — are what
+  /// the round outcome must be attributed to.
+  List<AnalystVote> _decisionVotes = const <AnalystVote>[];
   List<AnalystVote>? _microVotes;
   double? _microPrice;
   double? _microProbability;
@@ -268,6 +273,7 @@ class _PulseScreenState extends State<PulseScreen> {
     _microVotes = null;
     _microPrice = null;
     _microAt = null;
+    _decisionVotes = const <AnalystVote>[];
     if (entry != null) _appendPath(entry);
     // A new round means a new chart to process: refresh the analog archive so
     // the historical desk studies the window that just closed.
@@ -290,11 +296,13 @@ class _PulseScreenState extends State<PulseScreen> {
     final verdict = _verdict;
     final consensus = _consensus;
 
-    if (_lastVotes.isNotEmpty && consensus != null) {
+    final scoredVotes =
+        _decisionVotes.isNotEmpty ? _decisionVotes : _lastVotes;
+    if (scoredVotes.isNotEmpty && consensus != null) {
       _evolution = _evolutionEngine.learn(
         _evolution,
         wentUp: wentUp,
-        votes: _lastVotes,
+        votes: scoredVotes,
         consensusProbabilityUp:
             verdict?.probabilityUp ?? consensus.probabilityUp,
       );
@@ -578,6 +586,7 @@ class _PulseScreenState extends State<PulseScreen> {
 
         if (_verdict == null &&
             seconds <= PulseChiefAnalyst.lockAtSecondsRemaining) {
+          _decisionVotes = ensemble.votes;
           _verdict = _chief.decide(
             samples: _deliberation,
             consensus: consensus,
@@ -627,6 +636,12 @@ class _PulseScreenState extends State<PulseScreen> {
 
   /// Continuous learning: every ~30 seconds the population is scored against
   /// the move that actually happened since the previous review.
+  ///
+  /// This is deliberately weak. The analysts are forecasting a 5-minute close,
+  /// so a 30-second wiggle is only a proxy for their skill; at full strength
+  /// the ten reviews inside a round would outweigh the one outcome that
+  /// actually matters and the population would drift toward predicting the
+  /// wrong horizon. Moves inside the noise floor are ignored outright.
   void _learnContinuously(
     double price,
     List<AnalystVote> votes,
@@ -638,20 +653,28 @@ class _PulseScreenState extends State<PulseScreen> {
     final previousProbability = _microProbability;
     final now = _binanceNow;
 
+    // Noise floor: a third of the volatility the market itself expects over
+    // thirty seconds. Below that the sign of the move carries no information.
+    final expected = _signal?.expectedRemainingMovePct ?? .05;
+    final floorPct = math.max(expected * .18, .004);
+
     if (previousAt != null &&
         previousPrice != null &&
         previousVotes != null &&
         previousProbability != null &&
-        now.difference(previousAt).inSeconds >= 30 &&
-        (price - previousPrice).abs() > previousPrice * 1e-7) {
-      _evolution = _evolutionEngine.learn(
-        _evolution,
-        wentUp: price > previousPrice,
-        votes: previousVotes,
-        consensusProbabilityUp: previousProbability,
-        intensity: .30,
-        closedRound: false,
-      );
+        previousPrice > 0 &&
+        now.difference(previousAt).inSeconds >= 30) {
+      final movePct = (price - previousPrice) / previousPrice * 100;
+      if (movePct.abs() >= floorPct) {
+        _evolution = _evolutionEngine.learn(
+          _evolution,
+          wentUp: movePct > 0,
+          votes: previousVotes,
+          consensusProbabilityUp: previousProbability,
+          intensity: .10,
+          closedRound: false,
+        );
+      }
     }
 
     if (previousAt == null || now.difference(previousAt).inSeconds >= 30) {
@@ -950,6 +973,16 @@ class _PulseScreenState extends State<PulseScreen> {
               textAlign: TextAlign.center,
               style: LiquidType.subtitle,
             ),
+            if (!verdict.fullDeliberation) ...[
+              const SizedBox(height: 10),
+              const LiquidAlert(
+                message:
+                    'La ronda ya estaba en curso al abrir la app: el analista '
+                    'jefe no tuvo su minuto completo de deliberación y la '
+                    'convicción se recortó. La próxima ronda arranca desde cero.',
+                icon: Icons.timelapse,
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -969,9 +1002,14 @@ class _PulseScreenState extends State<PulseScreen> {
                   color: LiquidPalette.info,
                 ),
                 LiquidChip(
-                  label: '${verdict.samplesUsed} lecturas en 60 s',
+                  label: verdict.fullDeliberation
+                      ? '${verdict.samplesUsed} lecturas en 60 s'
+                      : 'ventana incompleta · ${verdict.samplesUsed} lecturas',
                   dense: true,
-                  color: LiquidPalette.inkFaint,
+                  color: verdict.fullDeliberation
+                      ? LiquidPalette.inkFaint
+                      : LiquidPalette.primary,
+                  icon: verdict.fullDeliberation ? null : Icons.timelapse,
                 ),
                 LiquidChip(
                   label: '${verdict.totalAnalysts} analistas',

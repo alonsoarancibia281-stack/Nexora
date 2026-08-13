@@ -35,7 +35,15 @@ import 'package:nexora_markets_ai/features/pulse/domain/pulse_probability_calibr
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_signal.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_statistical_engine.dart';
 
-const _rest = 'https://api.binance.com';
+/// Market-data hosts, tried in order.
+///
+/// `data-api.binance.vision` is Binance's public market-data endpoint and is
+/// not geo-restricted, which matters because the main API answers 451 to CI
+/// runners in the United States.
+const _hosts = <String>[
+  'https://data-api.binance.vision',
+  'https://api.binance.com',
+];
 const _cacheDir = '.backtest-cache';
 
 Future<List<Candle>> loadKlines(
@@ -52,17 +60,27 @@ Future<List<Candle>> loadKlines(
   final client = http.Client();
   final all = <List<dynamic>>[];
   int? endTime;
+  var hostIndex = 0;
   try {
     while (all.length < wanted) {
       final limit = math.min(1000, wanted - all.length);
-      final uri = Uri.parse('$_rest/api/v3/klines').replace(queryParameters: {
+      final uri = Uri.parse('${_hosts[hostIndex]}/api/v3/klines')
+          .replace(queryParameters: {
         'symbol': symbol,
         'interval': interval,
         'limit': '$limit',
         if (endTime != null) 'endTime': '$endTime',
       });
-      final response = await client.get(uri).timeout(const Duration(seconds: 30));
+      final response =
+          await client.get(uri).timeout(const Duration(seconds: 30));
       if (response.statusCode != 200) {
+        // 451 means the host is geo-blocked for this runner: move to the next.
+        if (hostIndex + 1 < _hosts.length) {
+          stdout.writeln('\n  ${_hosts[hostIndex]} respondió '
+              '${response.statusCode}; probando ${_hosts[hostIndex + 1]}');
+          hostIndex++;
+          continue;
+        }
         throw Exception('Binance ${response.statusCode}: ${response.body}');
       }
       final rows = (jsonDecode(response.body) as List<dynamic>)

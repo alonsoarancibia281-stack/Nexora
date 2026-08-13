@@ -346,6 +346,56 @@ void main() {
       expect(verdict.headline, contains('5 minutos'));
     });
 
+    test('an incomplete decision window is flagged and cut back', () {
+      final consensus = buildConsensus();
+      final audit = board.audit(
+        consensus: consensus,
+        signal: signal(),
+        evolution: PulseEvolutionState.bootstrap(),
+        secondsRemaining: 240,
+      );
+      final decidedAt = DateTime.utc(2026, 8, 13, 12, 1);
+
+      ChiefVerdict decide(int sampleCount, int secondsRemaining) => chief.decide(
+            samples: [
+              for (var i = 0; i < sampleCount; i++)
+                ChiefSample(
+                  takenAt: decidedAt,
+                  secondsRemaining: secondsRemaining + i,
+                  probabilityUp: .70,
+                  price: 45000,
+                  instability: 25,
+                  ensembleProbability: .70,
+                  mathProbability: .68,
+                  patternProbability: .5,
+                  newsProbability: .5,
+                ),
+            ],
+            consensus: consensus,
+            audit: audit,
+            signal: signal(),
+            entryPrice: 45000,
+            decidedAt: decidedAt,
+            secondsRemaining: secondsRemaining,
+          );
+
+      final complete = decide(12, PulseChiefAnalyst.lockAtSecondsRemaining);
+      expect(complete.fullDeliberation, isTrue);
+
+      // Joined the round with two minutes left: one glance, not a window.
+      final late = decide(1, 120);
+      expect(late.fullDeliberation, isFalse);
+      expect(late.confidence, lessThan(complete.confidence));
+      expect(
+        late.rationale.any((line) => line.contains('incompleta')),
+        isTrue,
+      );
+
+      // Too few readings even at the right moment still counts as incomplete.
+      final thin = decide(2, PulseChiefAnalyst.lockAtSecondsRemaining);
+      expect(thin.fullDeliberation, isFalse);
+    });
+
     test('unstable deliberation lowers the chief conviction', () {
       final consensus = buildConsensus();
       final audit = board.audit(

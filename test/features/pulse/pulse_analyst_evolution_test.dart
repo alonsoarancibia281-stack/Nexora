@@ -110,6 +110,43 @@ void main() {
     expect(restored.recordOf(1).weight, closeTo(state.recordOf(1).weight, 1e-9));
   });
 
+  test('short-horizon reviews never move the round calibration', () {
+    var state = PulseEvolutionState.bootstrap();
+    final slope = state.calibrationSlope;
+    final intercept = state.calibrationIntercept;
+
+    // Ten intra-round reviews, all resolving the same way.
+    for (var review = 0; review < 10; review++) {
+      state = engine.learn(
+        state,
+        wentUp: true,
+        votes: votes(state, bullish: true),
+        consensusProbabilityUp: .30,
+        intensity: .10,
+        closedRound: false,
+      );
+    }
+
+    expect(state.calibrationSlope, slope);
+    expect(state.calibrationIntercept, intercept);
+    // The analysts still learn from them, only the calibration is protected.
+    expect(state.experience, greaterThan(0));
+    expect(state.recordOf(1).weight, greaterThan(state.recordOf(2).weight));
+
+    final closed = engine.learn(
+      state,
+      wentUp: true,
+      votes: votes(state, bullish: true),
+      consensusProbabilityUp: .30,
+    );
+    expect(
+      closed.calibrationSlope != slope ||
+          closed.calibrationIntercept != intercept,
+      isTrue,
+      reason: 'a closed round must be allowed to move the calibration',
+    );
+  });
+
   test('calibration maps probabilities back into a valid range', () {
     final state = PulseEvolutionState.bootstrap();
     for (final p in <double>[.01, .2, .5, .8, .99]) {

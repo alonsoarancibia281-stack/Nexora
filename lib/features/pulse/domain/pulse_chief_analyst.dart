@@ -65,6 +65,7 @@ class ChiefVerdict {
     required this.headline,
     required this.auditVerdict,
     required this.auditQuality,
+    required this.fullDeliberation,
   });
 
   final PulseDirection direction;
@@ -94,6 +95,11 @@ class ChiefVerdict {
   /// Result of the 100-auditor final test on the packet that was handed over.
   final AuditVerdict auditVerdict;
   final double auditQuality;
+
+  /// False when the call had to be made without a complete decision window —
+  /// typically because the app joined the round after the first minute. The
+  /// conviction is cut accordingly and the screen says so.
+  final bool fullDeliberation;
 
   bool get isUp => direction == PulseDirection.up;
 
@@ -128,6 +134,12 @@ class PulseChiefAnalyst {
 
   /// Recency half-life inside the decision window, in seconds.
   static const double recencyHalfLifeSeconds = 22;
+
+  /// Readings required before the decision window counts as complete.
+  static const int minimumSamples = 4;
+
+  /// Tolerance, in seconds, for arriving late to the lock moment.
+  static const int lockToleranceSeconds = 20;
 
   ChiefVerdict decide({
     required List<ChiefSample> samples,
@@ -207,6 +219,15 @@ class PulseChiefAnalyst {
     logit *= audit.shrinkFactor;
     if (audit.verdict == AuditVerdict.vetoed) logit *= .45;
 
+    // A window that never happened cannot carry the conviction of one that
+    // did: joining a round late means the call rests on a single glance.
+    final fullDeliberation = pool.length >= minimumSamples &&
+        secondsRemaining >= lockAtSecondsRemaining - lockToleranceSeconds;
+    if (!fullDeliberation) {
+      final coverage = (pool.length / minimumSamples).clamp(.25, 1.0);
+      logit *= (.40 + coverage * .35);
+    }
+
     final probability = _sigmoid(logit).clamp(.05, .95).toDouble();
     final up = probability >= .5;
     final against = councils.where((v) => v.isUp != up).length;
@@ -229,6 +250,12 @@ class PulseChiefAnalyst {
       'Estabilidad de la evidencia durante el minuto de decisión: '
       '${(stability * 100).toStringAsFixed(0)}% sobre ${pool.length} lecturas.',
     );
+    if (!fullDeliberation) {
+      rationale.add(
+        'Ventana de decisión incompleta: la ronda ya estaba en curso al abrir '
+        'la app, así que la convicción se recortó.',
+      );
+    }
     rationale.add(
       'Mercado ${signal.stabilityLabel.toLowerCase()} '
       '(inestabilidad ${signal.instabilityScore.toStringAsFixed(0)}/100).',
@@ -266,6 +293,7 @@ class PulseChiefAnalyst {
       headline: headline,
       auditVerdict: audit.verdict,
       auditQuality: audit.qualityScore,
+      fullDeliberation: fullDeliberation,
     );
   }
 }
