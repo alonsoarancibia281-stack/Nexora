@@ -7,6 +7,7 @@ on:
     branches: ['claude/**', 'agent/**']
     paths:
       - 'tool/**'
+      - 'lib/features/pulse/domain/**'
       - '.github/workflows/backtest.yml'
   workflow_dispatch:
     inputs:
