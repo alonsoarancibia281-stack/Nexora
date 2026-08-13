@@ -35,6 +35,8 @@ import 'package:nexora_markets_ai/features/pulse/domain/pulse_probability_calibr
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_signal.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_statistical_engine.dart';
 
+import 'order_flow.dart';
+
 /// Market-data hosts, tried in order.
 ///
 /// `data-api.binance.vision` is Binance's public market-data endpoint and is
@@ -181,7 +183,11 @@ Future<void> main(List<String> args) async {
   var rounds = 1500;
   var useArchive = true;
   var decideAt = <int>[60];
+  var flowDays = 0;
   for (var i = 0; i < args.length; i++) {
+    if (args[i] == '--flow' && i + 1 < args.length) {
+      flowDays = int.tryParse(args[i + 1]) ?? 0;
+    }
     if (args[i] == '--rounds' && i + 1 < args.length) {
       rounds = int.tryParse(args[i + 1]) ?? rounds;
     }
@@ -206,21 +212,57 @@ Future<void> main(List<String> args) async {
   final fourHour = useArchive ? await loadKlines('BTCUSDT', '4h', 1000) : <Candle>[];
   final daily = useArchive ? await loadKlines('BTCUSDT', '1d', 1000) : <Candle>[];
 
+  FlowBook? flow;
+  if (flowDays > 0) {
+    stdout.writeln('\nReconstruyendo el flujo de órdenes…');
+    flow = await const OrderFlowLoader().load('BTCUSDT', flowDays);
+    final range = flowRange(flow);
+    if (range == null) {
+      stdout.writeln('  sin datos de flujo; se mide sólo con velas');
+      flow = null;
+    } else {
+      stdout.writeln('  cobertura ${range.from.toIso8601String()} → '
+          '${range.to.toIso8601String()}');
+    }
+  }
+
   for (final elapsed in decideAt) {
     if (decideAt.length > 1) {
       stdout.writeln('\n\n>>> Decidiendo a los ${elapsed}s de la ronda');
     }
-    await evaluate(
-      elapsed: elapsed,
-      rounds: rounds,
-      useArchive: useArchive,
-      oneMinute: oneMinute,
-      fiveMinute: fiveMinute,
-      ethOneMinute: ethOneMinute,
-      hourly: hourly,
-      fourHour: fourHour,
-      daily: daily,
-    );
+    if (flow == null) {
+      await evaluate(
+        elapsed: elapsed,
+        rounds: rounds,
+        useArchive: useArchive,
+        oneMinute: oneMinute,
+        fiveMinute: fiveMinute,
+        ethOneMinute: ethOneMinute,
+        hourly: hourly,
+        fourHour: fourHour,
+        daily: daily,
+      );
+      continue;
+    }
+
+    // Same rounds, same engine, one difference: whether the trade-flow desk
+    // gets to see anything. Anything else would not isolate the contribution.
+    for (final withFlow in <bool>[false, true]) {
+      stdout.writeln('\n--- ${withFlow ? 'CON' : 'SIN'} microestructura ---');
+      await evaluate(
+        elapsed: elapsed,
+        rounds: rounds,
+        useArchive: useArchive,
+        oneMinute: oneMinute,
+        fiveMinute: fiveMinute,
+        ethOneMinute: ethOneMinute,
+        hourly: hourly,
+        fourHour: fourHour,
+        daily: daily,
+        flow: withFlow ? flow : null,
+        restrictToFlow: flow,
+      );
+    }
   }
 }
 
@@ -234,6 +276,8 @@ Future<void> evaluate({
   required List<Candle> hourly,
   required List<Candle> fourHour,
   required List<Candle> daily,
+  FlowBook? flow,
+  FlowBook? restrictToFlow,
 }) async {
   const engine = PulseEngine();
   const statisticalEngine = PulseStatisticalEngine();
@@ -249,6 +293,7 @@ Future<void> evaluate({
   const features = PulseFeatureFactory();
 
   var evolution = PulseEvolutionState.bootstrap();
+  var flowRounds = 0;
   final results = <RoundResult>[];
   final started = DateTime.now();
 
@@ -260,6 +305,16 @@ Future<void> evaluate({
     final round = fiveMinute[i];
     final roundStart = round.openTime.toUtc();
     final decisionMoment = roundStart.add(Duration(seconds: elapsed));
+
+    // Both arms of the A/B must run on exactly the same rounds.
+    if (restrictToFlow != null) {
+      final range = flowRange(restrictToFlow);
+      if (range == null) continue;
+      if (roundStart.isBefore(range.from.add(const Duration(minutes: 5))) ||
+          roundStart.isAfter(range.to)) {
+        continue;
+      }
+    }
 
     const minute = Duration(minutes: 1);
     final minuteIndex = lastClosedIndex(oneMinute, decisionMoment, minute);
@@ -284,22 +339,26 @@ Future<void> evaluate({
       }));
     }
 
+    final tape = flow?.at(decisionMoment) ?? FlowSnapshot.empty;
+
     final frame = PulseMarketFrame(
       candles: candles,
       referenceCandles: ethCandles,
-      // Microstructure cannot be reconstructed from klines: kept neutral.
+      // The order book itself is not published historically, so the depth
+      // fields stay neutral. The trade tape is, and it is what the trade-flow
+      // desk actually reads.
       bidVolume: 0,
       askVolume: 0,
       spreadBps: 1,
       micropriceEdge: 0,
       nearImbalance: 0,
       queueImbalance: 0,
-      aggressorImbalance: 0,
-      signedVolume: 0,
-      tradeAcceleration: 0,
-      priceImpulseBps: 0,
-      flowPersistence: 0,
-      largeTradeBias: 0,
+      aggressorImbalance: tape.aggressorImbalance,
+      signedVolume: tape.signedVolume,
+      tradeAcceleration: tape.tradeAcceleration,
+      priceImpulseBps: tape.priceImpulseBps,
+      flowPersistence: tape.flowPersistence,
+      largeTradeBias: tape.largeTradeBias,
       roundStartPrice: entry,
       secondsRemaining: secondsRemaining,
     );
@@ -389,6 +448,7 @@ Future<void> evaluate({
       secondsRemaining: secondsRemaining,
     );
 
+    if (tape.trades > 0) flowRounds++;
     final actualUp = round.close > round.open;
     final priceAtDecision = candles.last.close;
     results.add(RoundResult(
@@ -423,7 +483,8 @@ Future<void> evaluate({
   }
   stdout.writeln();
 
-  report(results, DateTime.now().difference(started), chief);
+  report(results, DateTime.now().difference(started), chief,
+      flowRounds: flowRounds, flowAvailable: flow != null);
 }
 
 /// Candles that had already *closed* by [moment].
@@ -449,8 +510,10 @@ List<Candle> _sliceBefore(
 void report(
   List<RoundResult> results,
   Duration elapsed,
-  PulseChiefAnalyst chief,
-) {
+  PulseChiefAnalyst chief, {
+  int flowRounds = 0,
+  bool flowAvailable = false,
+}) {
   if (results.isEmpty) {
     stdout.writeln('Sin rondas evaluadas.');
     return;

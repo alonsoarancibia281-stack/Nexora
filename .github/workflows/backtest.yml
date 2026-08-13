@@ -19,6 +19,10 @@ on:
         description: 'Incluir el archivo histórico de patrones (más lento)'
         required: false
         default: 'true'
+      flow_days:
+        description: 'Días de tape de aggTrades a reconstruir (0 = sin microestructura)'
+        required: false
+        default: '5'
 
 jobs:
   backtest:
@@ -45,8 +49,11 @@ jobs:
           if [ "${{ github.event.inputs.archive }}" = "false" ]; then
             ARCHIVE_FLAG="--no-archive"
           fi
-          # --frontier barre 60/120/180/240/270s: la curva anticipación-acierto.
-          dart run tool/backtest.dart --rounds "$ROUNDS" --frontier $ARCHIVE_FLAG | tee backtest-report.txt
+          FLOW_DAYS="${{ github.event.inputs.flow_days }}"
+          FLOW_DAYS="${FLOW_DAYS:-5}"
+          # Con microestructura la corrida es un A/B sobre las mismas rondas,
+          # así que se mide en un único punto de decisión.
+          dart run tool/backtest.dart --rounds "$ROUNDS" --flow "$FLOW_DAYS" $ARCHIVE_FLAG | tee backtest-report.txt
       - name: Publish report in the job summary
         if: always()
         run: |
@@ -54,7 +61,7 @@ jobs:
             echo '## Backtest'
             echo ''
             echo '```'
-            grep -E 'Decidiendo a los|Acierto del motor|Movimiento ya realizado|Techo mecánico|Con lectura|Sin lectura|Ventaja del motor' backtest-report.txt
+            grep -E 'microestructura|Microestructura|Acierto del motor|Movimiento ya realizado|Ventaja del motor|Contradice|Con lectura|Sin lectura|Rondas evaluadas' backtest-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload report
