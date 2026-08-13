@@ -13,3 +13,7 @@ ios/Flutter/Generated.xcconfig
 # Flutter tool artefacts
 .flutter-plugins-dependencies
 pubspec.lock
+
+# Backtest cache
+.backtest-cache/
+backtest-report.txt

@@ -1,0 +1,53 @@
+name: Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: 'Rondas de 5 minutos a evaluar'
+        required: false
+        default: '2000'
+      archive:
+        description: 'Incluir el archivo histórico de patrones (más lento)'
+        required: false
+        default: 'true'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Run backtest
+        run: |
+          ARCHIVE_FLAG=""
+          if [ "${{ github.event.inputs.archive }}" != "true" ]; then
+            ARCHIVE_FLAG="--no-archive"
+          fi
+          dart run tool/backtest.dart --rounds "${{ github.event.inputs.rounds }}" $ARCHIVE_FLAG | tee backtest-report.txt
+      - name: Publish report in the job summary
+        if: always()
+        run: |
+          {
+            echo '## Backtest'
+            echo ''
+            echo '```'
+            tail -n 80 backtest-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: backtest-report.txt
+          if-no-files-found: warn
+          retention-days: 14
