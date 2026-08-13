@@ -54,6 +54,10 @@ jobs:
           # Con microestructura la corrida es un A/B sobre las mismas rondas,
           # así que se mide en un único punto de decisión.
           dart run tool/backtest.dart --rounds "$ROUNDS" --flow "$FLOW_DAYS" $ARCHIVE_FLAG | tee backtest-report.txt
+      - name: Prueba de información del flujo
+        run: |
+          set -o pipefail
+          dart run tool/flow_information.dart --days 30 | tee -a backtest-report.txt
       - name: Publish report in the job summary
         if: always()
         run: |
