@@ -6,6 +6,37 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../domain/candle.dart';
 import '../domain/market_asset.dart';
 
+/// One live 5-minute kline update as published by Binance.
+class BinanceKlineTick {
+  const BinanceKlineTick({
+    required this.eventTime,
+    required this.openTime,
+    required this.closeTime,
+    required this.open,
+    required this.high,
+    required this.low,
+    required this.close,
+    required this.volume,
+    required this.isClosed,
+  });
+
+  /// Exchange clock at the moment the message was produced.
+  final DateTime eventTime;
+  final DateTime openTime;
+
+  /// Inclusive close timestamp reported by Binance (end of candle − 1 ms).
+  final DateTime closeTime;
+  final double open;
+  final double high;
+  final double low;
+  final double close;
+  final double volume;
+  final bool isClosed;
+
+  /// Exclusive end of the round, i.e. the instant the next candle opens.
+  DateTime get roundEnd => closeTime.add(const Duration(milliseconds: 1));
+}
+
 class BinanceMarketService {
   BinanceMarketService({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
@@ -75,7 +106,7 @@ class BinanceMarketService {
     return (bidVolume: m.bidVolume, askVolume: m.askVolume);
   }
 
-  Future<({double bidVolume, double askVolume, double bestBid, double bestAsk, double spreadBps, double micropriceEdge})> loadDepthMetrics(String symbol, {int limit = 100}) async {
+  Future<({double bidVolume, double askVolume, double bestBid, double bestAsk, double spreadBps, double micropriceEdge, double nearImbalance, double queueImbalance})> loadDepthMetrics(String symbol, {int limit = 100}) async {
     final uri = Uri.parse('$_rest/api/v3/depth').replace(queryParameters: {'symbol': symbol.toUpperCase(), 'limit': '$limit'});
     final response = await _getWithRetry(uri);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -93,26 +124,44 @@ class BinanceMarketService {
     final topTotal = bidQty + askQty;
     final microprice = topTotal <= 0 ? mid : (bestAsk * bidQty + bestBid * askQty) / topTotal;
     final micropriceEdge = mid <= 0 ? 0.0 : ((microprice - mid) / mid * 10000).clamp(-5.0, 5.0).toDouble();
-    return (bidVolume: bidVolume, askVolume: askVolume, bestBid: bestBid, bestAsk: bestAsk, spreadBps: spreadBps, micropriceEdge: micropriceEdge);
+    final nearDepth = (bids.length < 10 || asks.length < 10) ? 10 : 10;
+    final nearBid = sumSide(bids.take(nearDepth).toList());
+    final nearAsk = sumSide(asks.take(nearDepth).toList());
+    final nearTotal = nearBid + nearAsk;
+    final nearImbalance = nearTotal <= 0 ? 0.0 : ((nearBid - nearAsk) / nearTotal).clamp(-1.0, 1.0).toDouble();
+    final queueImbalance = topTotal <= 0 ? 0.0 : ((bidQty - askQty) / topTotal).clamp(-1.0, 1.0).toDouble();
+    return (bidVolume: bidVolume, askVolume: askVolume, bestBid: bestBid, bestAsk: bestAsk, spreadBps: spreadBps, micropriceEdge: micropriceEdge, nearImbalance: nearImbalance, queueImbalance: queueImbalance);
   }
 
-  Future<({double aggressorImbalance, double signedVolume, double tradeAcceleration, double priceImpulseBps, int trades})> loadAggTradeMetrics(String symbol, {int limit = 500}) async {
+  Future<({double aggressorImbalance, double signedVolume, double tradeAcceleration, double priceImpulseBps, double flowPersistence, double largeTradeBias, int trades})> loadAggTradeMetrics(String symbol, {int limit = 500}) async {
     final safeLimit = limit.clamp(50, 1000);
     final uri = Uri.parse('$_rest/api/v3/aggTrades').replace(queryParameters: {'symbol': symbol.toUpperCase(), 'limit': '$safeLimit'});
     final response = await _getWithRetry(uri);
     final rows = (jsonDecode(response.body) as List<dynamic>).cast<Map<String, dynamic>>();
     if (rows.isEmpty) {
-      return (aggressorImbalance: 0.0, signedVolume: 0.0, tradeAcceleration: 0.0, priceImpulseBps: 0.0, trades: 0);
+      return (aggressorImbalance: 0.0, signedVolume: 0.0, tradeAcceleration: 0.0, priceImpulseBps: 0.0, flowPersistence: 0.0, largeTradeBias: 0.0, trades: 0);
     }
     var buyQty = 0.0, sellQty = 0.0, signed = 0.0;
     final half = rows.length ~/ 2;
     var firstHalfQty = 0.0, secondHalfQty = 0.0;
+    var sameSide = 0, transitions = 0;
+    int? previousSide;
+    final quantities = <double>[];
+    final sides = <int>[];
     for (var i = 0; i < rows.length; i++) {
       final r = rows[i];
       final qty = double.tryParse('${r['q']}') ?? 0.0;
       final buyerMaker = r['m'] == true;
+      final side = buyerMaker ? -1 : 1;
+      quantities.add(qty);
+      sides.add(side);
       if (buyerMaker) { sellQty += qty; signed -= qty; } else { buyQty += qty; signed += qty; }
       if (i < half) { firstHalfQty += qty; } else { secondHalfQty += qty; }
+      if (previousSide != null) {
+        transitions++;
+        if (previousSide == side) sameSide++;
+      }
+      previousSide = side;
     }
     final total = buyQty + sellQty;
     final aggressorImbalance = total <= 0 ? 0.0 : ((buyQty - sellQty) / total).clamp(-1.0, 1.0).toDouble();
@@ -121,7 +170,69 @@ class BinanceMarketService {
     final firstPrice = double.tryParse('${rows.first['p']}') ?? 0.0;
     final lastPrice = double.tryParse('${rows.last['p']}') ?? 0.0;
     final priceImpulseBps = firstPrice <= 0 ? 0.0 : ((lastPrice - firstPrice) / firstPrice * 10000).clamp(-20.0, 20.0).toDouble();
-    return (aggressorImbalance: aggressorImbalance, signedVolume: signedVolume, tradeAcceleration: tradeAcceleration, priceImpulseBps: priceImpulseBps, trades: rows.length);
+    final persistenceRatio = transitions == 0 ? 0.0 : (sameSide / transitions) * 2 - 1;
+    final flowPersistence = (persistenceRatio * (aggressorImbalance == 0 ? 0.0 : aggressorImbalance.sign)).clamp(-1.0, 1.0).toDouble();
+    final sorted = [...quantities]..sort();
+    final cutoff = sorted.isEmpty ? 0.0 : sorted[(sorted.length * 0.9).floor().clamp(0, sorted.length - 1)];
+    var largeSigned = 0.0, largeTotal = 0.0;
+    for (var i = 0; i < quantities.length; i++) {
+      if (quantities[i] >= cutoff && cutoff > 0) {
+        largeSigned += quantities[i] * sides[i];
+        largeTotal += quantities[i];
+      }
+    }
+    final largeTradeBias = largeTotal <= 0 ? 0.0 : (largeSigned / largeTotal).clamp(-1.0, 1.0).toDouble();
+    return (aggressorImbalance: aggressorImbalance, signedVolume: signedVolume, tradeAcceleration: tradeAcceleration, priceImpulseBps: priceImpulseBps, flowPersistence: flowPersistence, largeTradeBias: largeTradeBias, trades: rows.length);
+  }
+
+  /// Live 5-minute kline stream straight from Binance.
+  ///
+  /// Every message carries the exchange event time plus the exact open/close
+  /// timestamps of the running candle, which is what keeps the round countdown
+  /// aligned with Binance instead of with the device clock.
+  Stream<BinanceKlineTick> liveKline(String symbol, String interval) async* {
+    var retry = 0;
+    while (true) {
+      WebSocketChannel? channel;
+      try {
+        final stream = '${symbol.toLowerCase()}@kline_$interval';
+        channel = WebSocketChannel.connect(Uri.parse('$_ws/$stream'));
+        await channel.ready.timeout(const Duration(seconds: 8));
+        retry = 0;
+        await for (final event in channel.stream) {
+          final data = jsonDecode(event as String) as Map<String, dynamic>;
+          final k = data['k'];
+          if (k is! Map<String, dynamic>) continue;
+          final tick = BinanceKlineTick(
+            eventTime: DateTime.fromMillisecondsSinceEpoch(
+              (data['E'] as num?)?.toInt() ?? 0,
+              isUtc: true,
+            ),
+            openTime: DateTime.fromMillisecondsSinceEpoch(
+              (k['t'] as num?)?.toInt() ?? 0,
+              isUtc: true,
+            ),
+            closeTime: DateTime.fromMillisecondsSinceEpoch(
+              (k['T'] as num?)?.toInt() ?? 0,
+              isUtc: true,
+            ),
+            open: double.tryParse('${k['o']}') ?? 0,
+            high: double.tryParse('${k['h']}') ?? 0,
+            low: double.tryParse('${k['l']}') ?? 0,
+            close: double.tryParse('${k['c']}') ?? 0,
+            volume: double.tryParse('${k['v']}') ?? 0,
+            isClosed: k['x'] == true,
+          );
+          if (tick.openTime.millisecondsSinceEpoch > 0) yield tick;
+        }
+      } catch (_) {
+        retry++;
+        final seconds = retry.clamp(1, 8);
+        await Future<void>.delayed(Duration(seconds: seconds));
+      } finally {
+        await channel?.sink.close();
+      }
+    }
   }
 
   Stream<double> livePrice(String symbol) async* {

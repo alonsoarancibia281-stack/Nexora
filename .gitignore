@@ -9,3 +9,7 @@ coverage/
 *.iml
 android/local.properties
 ios/Flutter/Generated.xcconfig
+
+# Flutter tool artefacts
+.flutter-plugins-dependencies
+pubspec.lock

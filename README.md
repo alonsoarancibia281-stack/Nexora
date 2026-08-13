@@ -26,3 +26,27 @@ flutter run \
 Los secretos (`OWNER_EMAIL`, `OTP_PEPPER`, `RESEND_API_KEY`, `EMAIL_FROM`, `APP_ORIGIN`) deben configurarse únicamente en Supabase/Edge Functions.
 
 Consulta `docs/PHASE_1.md` y `docs/PHASE_1_CHECKLIST.md` para instalación, seguridad y pendientes de staging.
+
+## Predicciones minutos BTC
+
+El apartado de predicciones funciona como una sala de análisis de **401 agentes** que trabajan sobre rondas de cinco minutos sincronizadas con el reloj de Binance.
+
+| Consejo | Agentes | Qué aporta |
+| --- | --- | --- |
+| Analistas de mercado | 100 | Diez equipos (momentum, tendencia, volatilidad, reversión, libro, flujo, volumen, price action, intermercado, régimen) con genoma evolutivo |
+| Matemáticos | 50 | Diez ramas y cincuenta operaciones complejas (Ornstein-Uhlenbeck, Hurst, DFT, entropías, Kalman, GARCH, Lyapunov, valores extremos, PCA/SSA, control óptimo) |
+| Patrones históricos | 100 | Diez lentes buscando episodios análogos en años de velas de 5m, 1h, 4h y 1d |
+| Noticias en vivo | 50 | Diez mesas leyendo feeds públicos de Bitcoin cada 45 segundos |
+| Auditoría | 100 | Test final en diez dominios sobre todo lo anterior antes de elevar el paquete |
+| Analista jefe | 1 | Escucha durante el primer minuto de la ronda y fija una única decisión: sube o baja al cierre |
+
+### Cómo funciona una ronda
+
+1. **Apertura.** El stream de klines de Binance entrega el instante exacto de inicio, la apertura de la vela y el contador. Se procesa el gráfico y se fija la tesis de la ronda con objetivo y nivel de invalidación.
+2. **Minuto de decisión.** Los consejos entregan lecturas cada tres segundos. La auditoría recorta la evidencia según lo que encuentra y el analista jefe bloquea el veredicto al cumplirse el primer minuto.
+3. **Seguimiento.** El gráfico en vivo, el avance hacia el objetivo y el estado de la tesis se actualizan con cada tick hasta el cierre.
+4. **Aprendizaje.** Al cerrar la vela se comparan apertura y cierre: los analistas que acertaron ganan peso, los que fallaron lo pierden y, cada cierto nivel de experiencia, los peores se reemplazan por cruces mutados de los mejores. El estado evolutivo se guarda en el dispositivo.
+
+La pestaña **Red neuronal** muestra en vivo el flujo completo —datos, consejos, equipos, auditoría y analista jefe— con el color indicando dirección y el grosor la fuerza de la evidencia.
+
+> Modelo experimental de uso educativo: no ejecuta operaciones ni garantiza resultados.
