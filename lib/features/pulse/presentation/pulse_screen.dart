@@ -914,8 +914,17 @@ class _PulseScreenState extends State<PulseScreen> {
 
     if (!_overlayOn) return;
     final tapped = await _overlay.update(_overlayReading());
-    if (tapped == 'toggle' && mounted) {
-      _toggleGuard();
+    if (!mounted) return;
+    switch (tapped) {
+      case 'toggle':
+        _toggleGuard();
+      case 'close':
+        // The user dismissed the panel from on top of the exchange; the switch
+        // in here has to follow.
+        setState(() {
+          _overlayOn = false;
+          _overlayPending = false;
+        });
     }
   }
 
@@ -1349,8 +1358,9 @@ class _PulseScreenState extends State<PulseScreen> {
             const SizedBox(height: 8),
             Text(
               'Deja el veredicto y la cuenta atrás flotando sobre Binance '
-              'mientras miras el gráfico allí. Se arrastra a donde quieras y, '
-              'al tocarlo, vuelves a Nexora.',
+              'mientras miras el gráfico allí. Se arrastra a donde quieras, al '
+              'tocarlo vuelves a Nexora y la ✕ de su esquina lo quita de la '
+              'pantalla sin salir del exchange.',
               style: LiquidType.caption,
             ),
             const SizedBox(height: 6),

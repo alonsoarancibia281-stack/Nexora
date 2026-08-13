@@ -55,6 +55,7 @@ class OverlayService : Service() {
     private lateinit var countdown: TextView
     private lateinit var guardLine: TextView
     private lateinit var actionButton: TextView
+    private lateinit var closeButton: TextView
 
     private var alarmShown = false
 
@@ -111,8 +112,8 @@ class OverlayService : Service() {
             elevation = dp(6f).toFloat()
         }
 
-        // Everything above the button is the drag handle; a plain tap on it
-        // brings Nexora back to the front.
+        // Everything except the two buttons is the drag handle; a plain tap on
+        // it brings Nexora back to the front.
         val handle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -164,6 +165,40 @@ class OverlayService : Service() {
         handle.addView(guardLine)
         handle.setOnTouchListener(DragListener())
 
+        // Dismiss without going back into Nexora: the panel is on top of the
+        // exchange, so that is where the user needs to be able to close it.
+        closeButton = TextView(this).apply {
+            text = "✕"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(INK_FAINT)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            // Padding rather than a smaller glyph: the target has to be big
+            // enough to hit with a thumb on top of another app.
+            setPadding(dp(10f), dp(4f), dp(2f), dp(10f))
+            contentDescription = "Quitar la superposición"
+            setOnClickListener { onCloseTapped() }
+        }
+
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                handle,
+                LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f,
+                ),
+            )
+            addView(
+                closeButton,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { gravity = Gravity.TOP },
+            )
+        }
+
         actionButton = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
             setTextColor(Color.WHITE)
@@ -185,7 +220,7 @@ class OverlayService : Service() {
             )
         }
 
-        view.addView(handle)
+        view.addView(headerRow)
         view.addView(buttonRow)
 
         params = WindowManager.LayoutParams(
@@ -262,6 +297,16 @@ class OverlayService : Service() {
         }
     }
 
+    /**
+     * Takes the panel off the screen. The flag is left behind for Flutter to
+     * pick up on its next update, so the switch inside the app does not stay
+     * on after the panel is gone.
+     */
+    private fun onCloseTapped() {
+        pendingAction = "close"
+        stopSelf()
+    }
+
     private fun openNexora() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return
@@ -299,6 +344,7 @@ class OverlayService : Service() {
         detail.setTextColor(if (alarm) ALARM_SOFT else INK_FAINT)
 
         countdown.setTextColor(if (alarm) Color.WHITE else INK)
+        closeButton.setTextColor(if (alarm) ALARM_SOFT else INK_FAINT)
 
         guardLine.text = reading.guardDetail
         guardLine.visibility =
