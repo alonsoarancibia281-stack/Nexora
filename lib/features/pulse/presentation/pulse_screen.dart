@@ -17,6 +17,7 @@ import '../domain/pulse_consensus_engine.dart';
 import '../domain/pulse_engine.dart';
 import '../domain/pulse_ensemble_100.dart';
 import '../domain/pulse_feature_factory.dart';
+import '../domain/pulse_flow_edge.dart';
 import '../domain/pulse_math_council.dart';
 import '../domain/pulse_news_desk.dart';
 import '../domain/pulse_pattern_archive.dart';
@@ -542,6 +543,14 @@ class _PulseScreenState extends State<PulseScreen> {
         news: _news,
         patterns: _patterns,
         evolution: _evolution,
+        // The tape is read twice: once by the trade-flow desk among the 100,
+        // and once here with the weights measured against real outcomes.
+        flow: PulseFlowEdge(
+          aggressorImbalance: trades.aggressorImbalance,
+          priceImpulseBps: trades.priceImpulseBps,
+          flowPersistence: trades.flowPersistence,
+          trades: trades.trades,
+        ),
         statistical: statistical,
         calibrated: calibrated,
         logistic: logistic,

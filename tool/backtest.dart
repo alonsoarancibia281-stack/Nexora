@@ -28,6 +28,7 @@ import 'package:nexora_markets_ai/features/pulse/domain/pulse_consensus_engine.d
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_engine.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_ensemble_100.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_feature_factory.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_flow_edge.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_math_council.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_news_desk.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_pattern_archive.dart';
@@ -425,6 +426,12 @@ Future<void> evaluate({
       news: NewsBriefing.empty(),
       patterns: patterns,
       evolution: evolution,
+      flow: PulseFlowEdge(
+        aggressorImbalance: tape.aggressorImbalance,
+        priceImpulseBps: tape.priceImpulseBps,
+        flowPersistence: tape.flowPersistence,
+        trades: tape.trades,
+      ),
       statistical: statistical,
       calibrated: calibrated,
       logistic: logistic,

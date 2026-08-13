@@ -7,6 +7,7 @@ import 'package:nexora_markets_ai/features/pulse/domain/pulse_audit_board.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_chief_analyst.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_consensus_engine.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_ensemble_100.dart';
+import 'package:nexora_markets_ai/features/pulse/domain/pulse_flow_edge.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_math_council.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_news_desk.dart';
 import 'package:nexora_markets_ai/features/pulse/domain/pulse_pattern_archive.dart';
@@ -552,6 +553,75 @@ void main() {
       final withBear = fuseWith(travelled(.06), -.8);
 
       expect(withBull.probabilityUp, greaterThan(withBear.probabilityUp));
+    });
+  });
+
+  group('trade tape', () {
+    PulseSignal flat() => PulseSignal(
+          direction: PulseDirection.up,
+          score: 4,
+          confidence: 55,
+          momentumScore: 4,
+          trendScore: 3,
+          orderBookImbalance: 0,
+          volumeRatio: 1,
+          bodyPressure: 2,
+          instabilityScore: 20,
+          stability: MarketStability.stable,
+          agreementRatio: .5,
+          roundDistancePct: 0,
+          expectedRemainingMovePct: .12,
+          reasons: const <String>[],
+        );
+
+    PulseConsensus fuseWithFlow(PulseFlowEdge flow) {
+      final state = PulseEvolutionState.bootstrap();
+      return fusion.fuse(
+        signal: flat(),
+        ensemble: ensemble.analyze(input(0), evolution: state),
+        briefing: MathBriefing.neutral(),
+        news: NewsBriefing.empty(),
+        patterns: PatternBriefing.empty(),
+        evolution: state,
+        flow: flow,
+      );
+    }
+
+    test('an empty tape changes nothing', () {
+      expect(fuseWithFlow(PulseFlowEdge.empty).flowAdjustment, 0);
+    });
+
+    test('a one-sided tape pushes the verdict its way', () {
+      const buying = PulseFlowEdge(
+        aggressorImbalance: .6,
+        priceImpulseBps: 9,
+        flowPersistence: .5,
+        trades: 800,
+      );
+      const selling = PulseFlowEdge(
+        aggressorImbalance: -.6,
+        priceImpulseBps: -9,
+        flowPersistence: -.5,
+        trades: 800,
+      );
+
+      expect(buying.logOdds, greaterThan(0));
+      expect(selling.logOdds, lessThan(0));
+      expect(
+        fuseWithFlow(buying).probabilityUp,
+        greaterThan(fuseWithFlow(selling).probabilityUp),
+      );
+    });
+
+    test('the tape contribution stays bounded', () {
+      const extreme = PulseFlowEdge(
+        aggressorImbalance: 12,
+        priceImpulseBps: 900,
+        flowPersistence: 12,
+        trades: 5000,
+      );
+
+      expect(extreme.logOdds, lessThanOrEqualTo(PulseFlowEdge.bound + 1e-9));
     });
   });
 

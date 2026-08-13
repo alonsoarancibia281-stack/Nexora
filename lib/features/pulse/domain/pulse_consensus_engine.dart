@@ -4,6 +4,7 @@ import 'btc_5m_logistic_model.dart';
 import 'pulse_ai_consensus.dart';
 import 'pulse_analyst_evolution.dart';
 import 'pulse_ensemble_100.dart';
+import 'pulse_flow_edge.dart';
 import 'pulse_math_council.dart';
 import 'pulse_news_desk.dart';
 import 'pulse_pattern_archive.dart';
@@ -41,6 +42,7 @@ class PulseConsensus {
     required this.evidence,
     required this.anchorProbabilityUp,
     required this.councilAdjustment,
+    required this.flowAdjustment,
     required this.overridesAnchor,
   });
 
@@ -73,6 +75,9 @@ class PulseConsensus {
   /// Log-odds the councils added on top of the anchor (bounded).
   final double councilAdjustment;
 
+  /// Log-odds the trade tape added, with its separately fitted weights.
+  final double flowAdjustment;
+
   /// True when the councils flipped the direction the anchor pointed to.
   final bool overridesAnchor;
 
@@ -92,12 +97,19 @@ class PulseConsensus {
 /// lets a single strongly informed model move the verdict when the rest
 /// abstain around 50%.
 class PulseConsensusEngine {
-  const PulseConsensusEngine({this.councilAuthority = .70});
+  const PulseConsensusEngine({this.councilAuthority = defaultAuthority});
 
   /// How far, in log-odds, the councils may move the diffusion anchor.
   ///
-  /// 0.70 lets them shift the probability by roughly ±17 points and reverse
-  /// the call only while the anchor sits between 33% and 67%.
+  /// The rule it encodes is unchanged since it was measured: the councils may
+  /// always shade the answer, but may only reverse it while the anchor sits
+  /// between 33% and 67%. Because the anchor now enters shrunk by its fitted
+  /// coefficient, holding that same boundary means shrinking the bound by the
+  /// same factor — 0.70 × 0.48. Left as it was, the councils would inherit an
+  /// authority nobody measured them to deserve, and on the rounds where they
+  /// contradicted the anchor they scored 40.7%.
+  static const double defaultAuthority = .70 * PulseFlowEdge.anchorShrink;
+
   final double councilAuthority;
 
   PulseConsensus fuse({
@@ -107,6 +119,7 @@ class PulseConsensusEngine {
     required NewsBriefing news,
     required PatternBriefing patterns,
     required PulseEvolutionState evolution,
+    PulseFlowEdge flow = PulseFlowEdge.empty,
     PulseStatisticalResult? statistical,
     PulseProbabilityResult? calibrated,
     Btc5mLogisticResult? logistic,
@@ -228,6 +241,7 @@ class PulseConsensusEngine {
         evidence: 0,
         anchorProbabilityUp: .5,
         councilAdjustment: 0,
+        flowAdjustment: 0,
         overridesAnchor: false,
       );
     }
@@ -268,14 +282,26 @@ class PulseConsensusEngine {
             .clamp(-4.0, 4.0)
             .toDouble();
     final anchorProbability = _normalCdf(anchorZ).clamp(.05, .95).toDouble();
-    final anchorLogit = _logit(anchorProbability);
+
+    // Fitted against 8639 real rounds the anchor's coefficient came out at
+    // 0.7754 ± 0.0266, not 1: the diffusion reading points the right way but
+    // claims more certainty than the outcomes justify. Shrinking it by the
+    // measured factor is a correction, not a tuning knob.
+    final anchorLogit = _logit(anchorProbability) * PulseFlowEdge.anchorShrink;
 
     // The councils may always shade the answer, but they can only reverse it
     // when the anchor itself is weak — which is exactly when the first minute
     // carries little information.
     final adjustment =
         councilLogit.clamp(-councilAuthority, councilAuthority).toDouble();
-    final logit = anchorLogit + adjustment;
+
+    // The tape enters separately, with the weights it was measured to deserve.
+    // Routed through the analysts it would arrive divided by a hundred voters
+    // and then truncated by the council bound; its information is real and too
+    // small to survive that.
+    final flowAdjustment = flow.logOdds;
+
+    final logit = anchorLogit + adjustment + flowAdjustment;
 
     final raw = _sigmoid(logit).clamp(.04, .96).toDouble();
     final calibratedProbability =
@@ -299,6 +325,7 @@ class PulseConsensusEngine {
       evidence: evidence,
       anchorProbabilityUp: anchorProbability,
       councilAdjustment: adjustment,
+      flowAdjustment: flowAdjustment,
       overridesAnchor: (probability >= .5) != (anchorProbability >= .5),
     );
   }
