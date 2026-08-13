@@ -337,4 +337,112 @@ void report(List<Sample> samples) {
         '(z=${(best.first[2] as double).toStringAsFixed(2)}).');
   }
   stdout.writeln('=' * 74);
+
+  productionModel(samples);
+}
+
+/// Features that go into the shipped model, in raw units — the same units the
+/// engine has at prediction time, so the coefficients can be copied across
+/// without carrying any normalisation constant along with them.
+const productionFeatures = <String>[
+  'flujo·desequilibrio agresor',
+  'flujo·impulso de precio',
+  'flujo·persistencia',
+];
+
+/// Fits what actually ships — anchor plus the surviving flow features — and
+/// checks it on rounds the fit never saw.
+///
+/// The per-feature test above says the information exists. This says how much
+/// of it survives being written into the engine: the coefficients are in raw
+/// units, and the holdout is chronological, so nothing here is recoverable by
+/// tuning after the fact.
+void productionModel(List<Sample> samples) {
+  final n = samples.length;
+  final split = (n * .7).round();
+
+  List<List<double>> design(Iterable<Sample> rows, {required bool withFlow}) => [
+        for (final s in rows)
+          <double>[
+            1,
+            s.anchorLogit,
+            if (withFlow)
+              for (final name in productionFeatures) s.features[name] ?? 0,
+          ],
+      ];
+
+  final train = samples.sublist(0, split);
+  final test = samples.sublist(split);
+  final yTrain = [for (final s in train) s.outcome];
+
+  final anchorOnly = fitLogistic(design(train, withFlow: false), yTrain);
+  final full = fitLogistic(design(train, withFlow: true), yTrain);
+
+  stdout.writeln('');
+  stdout.writeln('=' * 74);
+  stdout.writeln('MODELO DE PRODUCCIÓN · ancla recalibrada + flujo');
+  stdout.writeln('=' * 74);
+  stdout.writeln('Ajuste sobre las primeras $split rondas, '
+      'validación sobre las ${test.length} restantes.');
+  stdout.writeln('');
+  stdout.writeln('  término                             coef        z');
+  stdout.writeln('  ${'-' * 52}');
+  final terms = <String>['constante', 'logit(ancla)', ...productionFeatures];
+  for (var j = 0; j < terms.length; j++) {
+    final z = full.se[j] <= 0 ? 0.0 : full.beta[j] / full.se[j];
+    stdout.writeln('  ${terms[j].padRight(32)}'
+        '${full.beta[j].toStringAsFixed(4).padLeft(10)}'
+        '${z.toStringAsFixed(2).padLeft(9)}');
+  }
+  stdout.writeln('');
+  stdout.writeln('Coeficientes en unidades crudas: el desequilibrio y la');
+  stdout.writeln('persistencia van en [-1,1] y el impulso en bps/20.');
+
+  double predict(LogitFit fit, List<double> row) {
+    var eta = 0.0;
+    for (var j = 0; j < row.length; j++) {
+      eta += fit.beta[j] * row[j];
+    }
+    return 1 / (1 + math.exp(-eta.clamp(-30.0, 30.0)));
+  }
+
+  void score(String label, List<double> probabilities) {
+    var hits = 0;
+    var logLoss = 0.0;
+    var brier = 0.0;
+    for (var i = 0; i < test.length; i++) {
+      final p = probabilities[i].clamp(1e-9, 1 - 1e-9);
+      final y = test[i].outcome;
+      if ((p >= .5) == (y == 1.0)) hits++;
+      logLoss -= y * math.log(p) + (1 - y) * math.log(1 - p);
+      brier += (p - y) * (p - y);
+    }
+    stdout.writeln('  ${label.padRight(26)}'
+        '${(hits / test.length * 100).toStringAsFixed(2).padLeft(8)}%'
+        '${(logLoss / test.length).toStringAsFixed(5).padLeft(11)}'
+        '${(brier / test.length).toStringAsFixed(5).padLeft(10)}');
+  }
+
+  final testAnchor = design(test, withFlow: false);
+  final testFull = design(test, withFlow: true);
+
+  stdout.writeln('');
+  stdout.writeln('Fuera de muestra:');
+  stdout.writeln('  ${'modelo'.padRight(26)}${'acierto'.padLeft(9)}'
+      '${'log-pérdida'.padLeft(11)}${'Brier'.padLeft(10)}');
+  stdout.writeln('  ${'-' * 56}');
+  score('ancla tal cual', [
+    for (final s in test) 1 / (1 + math.exp(-s.anchorLogit)),
+  ]);
+  score('ancla recalibrada', [
+    for (final row in testAnchor) predict(anchorOnly, row),
+  ]);
+  score('ancla + flujo', [
+    for (final row in testFull) predict(full, row),
+  ]);
+  stdout.writeln('');
+  stdout.writeln('La log-pérdida es la que manda: el acierto apenas se mueve');
+  stdout.writeln('porque el flujo casi nunca da la vuelta al signo del ancla,');
+  stdout.writeln('pero sí corrige cuánta confianza merece.');
+  stdout.writeln('=' * 74);
 }
