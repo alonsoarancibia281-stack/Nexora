@@ -61,40 +61,52 @@ El código nativo de Android vive en `android_native/` y `tool/android_wrapper.p
 
 ### Validación
 
-El motor se mide con `tool/backtest.dart`, que replica la historia real de Binance ronda a ronda: al minuto uno corre el consejo completo con los datos disponibles en ese instante, emite la llamada y recién después la puntúa contra el cierre. La población aprende tras cada ronda, así que la medición es fuera de muestra.
+El motor se mide con `tool/backtest.dart`, que replica la historia real de Binance ronda a ronda: al minuto uno corre el consejo completo con los datos disponibles en ese instante, emite la llamada y sólo después la puntúa contra el cierre. La población aprende tras cada ronda, así que ninguna predicción ha visto su propio resultado.
 
-Última corrida: **10.999 rondas** entre el 6 de julio y el 13 de agosto de 2026.
-
-| Métrica | Valor |
-| --- | --- |
-| Acierto con lectura (54% de las rondas) | **69,20%** |
-| Acierto sobre todas las rondas | 64,13% |
-| Rondas silenciadas por la puerta | 46% (habrían acertado 58,18%) |
-| Calibración | 20‑30% → subió 22,2% · 50‑60% → 57,6% · 70‑80% → 79,3% |
-
-El resultado se sostiene en los tres terciles de volatilidad (69,2% / 67,8% / 70,7% con lectura) y en los seis tramos cronológicos (67,4% a 70,6%), así que no es un artefacto de una semana concreta.
-
-**Qué produce ese acierto.** Al minuto uno ya se conoce un quinto de la vela. Bajo difusión, el cierre queda por encima de la apertura con probabilidad Φ(d/σ√τ), y seguir sólo esa cantidad acierta el 64,41% —frente al 50,84% de la clase mayoritaria—. El motor completo rinde 64,13%: estadísticamente indistinguible de esa referencia (z = −0,30).
-
-Dicho sin adornos: **el mérito medible es del ancla de difusión y de la puerta de seguridad, no de los 401 agentes.** Los consejos ya no restan —antes de anclarlos perdían casi cinco puntos contra la referencia— pero tampoco suman de forma detectable en klines.
+**El rival correcto no es la moneda.** Al minuto uno ya ocurrió un quinto de la vela, y seguir sólo esa parte ya realizada acierta alrededor del 64% —cerca del techo mecánico ½ + arcsin√(t/T)/π = 64,76%—. Batir al 50% no significa nada; todo lo que sigue se compara contra esa regla trivial.
 
 ### El flujo de órdenes
 
-`tool/flow_information.dart` reconstruye el tape real desde los volcados diarios de Binance y pregunta lo que el A/B extremo a extremo no podía separar: ¿queda información en la microestructura una vez descontada el ancla? Sobre 8.639 rondas de treinta días, tres features pasan el umbral de Bonferroni —desequilibrio agresor (z = 5,06), impulso de precio (z = 3,39) y persistencia (z = 3,55)— y las cinco de vela salen nulas, porque el ancla ya las absorbe. La prueba conjunta da χ² = 49,09 con 5 g.l. contra un crítico de 11,07.
+`tool/flow_information.dart` reconstruye el tape real desde los volcados diarios de Binance y pregunta lo que el A/B extremo a extremo no podía separar: ¿queda información en la microestructura una vez descontada el ancla? Sobre 8.639 rondas de treinta días, tres features pasan el umbral de Bonferroni —desequilibrio agresor, impulso de precio y persistencia— y las cinco de vela salen nulas, porque el ancla ya las absorbe.
 
-Ese ajuste se copió al consenso tal cual: el tape entra una vez, con sus coeficientes, y el ancla entra encogida por el suyo. Sobre las 2.592 rondas apartadas del ajuste, la log‑pérdida baja de 0,64068 a 0,63400 y el acierto de 63,19% a 64,58%.
+Ese ajuste se copia al consenso tal cual: el tape entra una sola vez, con sus coeficientes, en vez de diluirse entre cien votos y quedar truncado por el límite del consejo.
 
-Medido de punta a punta sobre las mismas 2.879 rondas, con y sin ese término:
+Una cautela sobre las ventanas: el desequilibrio y el impulso a 30, 60 y 120 segundos pasan el umbral **por separado**, pero metidos juntos en el mismo ajuste se canibalizan —el de 30 s llega a cambiar de signo— y el modelo empeora fuera de muestra (63,70% contra 64,74%). Pasar la prueba en solitario no es merecer asiento en el ajuste conjunto. Se quedan las tres lecturas de la ventana de 60 s.
 
-| | sin flujo | con flujo |
-| --- | --- | --- |
-| Acierto | 63,63% | 63,84% |
-| Brier | 0,23024 | **0,22704** |
-| Cobertura de la puerta | 44,2% | **50,9%** |
-| Acierto con lectura | 69,52% | 69,74% |
+### La σ del ancla
 
-Lo que compra el flujo no es acierto bruto —dos décimas, ruido— sino **confianza mejor medida**: con el mismo umbral del 6% el motor se atreve a hablar en la mitad de las rondas en vez de en el 44%, y acierta igual. Ese tramo del backtest cae dentro de la ventana donde se ajustaron los coeficientes; el número limpio es el de la validación apartada.
+El ancla es Φ(d/σ√τ). Durante meses su coeficiente ajustado salía 0,7754 ± 0,0266 y se leía como «el ancla exagera». Era otra cosa: σ venía del ATR de 14 periodos multiplicado por un 0,72 puesto a mano, y el ATR es rango verdadero, no desviación típica de retornos —su razón se ensancha en tendencia y se estrecha en lateral, así que la z entraba sesgada—.
 
-Lo que sigue sin resolverse: el motor empata con la regla del primer minuto (−0,10 puntos, z = −0,06) y cuando la contradice acierta el 49,51%. Mejor que el 40,72% del que se partía, pero todavía no es aportar. El `random_walk_guard` y el `cost_benchmark` del marco de conocimiento de Nexora siguen dando los 401 agentes por no probados.
+`tool/anchor_lab.dart` compara cinco estimadores sobre las mismas 8.639 rondas:
+
+| σ | coeficiente | ± | log‑pérdida |
+| --- | --- | --- | --- |
+| ATR × 0,72 (lo que había) | 0,7754 | 0,0266 | 0,64068 |
+| Desviación típica de 60 m | 0,9569 | 0,0331 | 0,63530 |
+| Bipotencia | 0,8180 | 0,0287 | 0,63457 |
+| **EWMA de retornos de 1 m** | **0,9943** | 0,0336 | 0,63458 |
+| EWMA con forma horaria | 0,9095 | 0,0315 | 0,63357 |
+
+Un coeficiente de 1,00 significa que la probabilidad se puede tomar al pie de la letra. La EWMA de retornos de un minuto da 0,9943 ± 0,0336. **La difusión nunca fue el modelo equivocado; σ estaba mal estimada.**
+
+Se envía la EWMA. La variante estacional gana 0,001 de log‑pérdida, que no compensa veinticuatro constantes ajustadas que además no se pueden estimar en el móvil, y encima su coeficiente se aleja de 1; queda medida en el banco.
+
+### Lo que fue moviendo la aguja
+
+Todas las filas son la misma ventana de 2.879 rondas (3–12 de agosto), decidiendo al minuto uno. La referencia a batir es la regla trivial de seguir el primer minuto, que en esa ventana acierta el 63,95%.
+
+| versión | acierto | ventaja | al contradecir | Brier | puerta 6% |
+| --- | --- | --- | --- | --- | --- |
+| consejos sin anclar | 59,18% | −4,90 | 40,72% | — | — |
+| ancla de difusión (ATR) | 63,63% | −0,31 | 48,65% | 0,23024 | 44,2% → 69,52% |
+| + flujo de órdenes | 63,84% | −0,10 | 49,51% | 0,22704 | 50,9% → 69,74% |
+| + σ de EWMA | 63,88% | −0,07 | 49,69% | 0,22726 | 50,2% → 69,92% |
+| + reparto reajustado | **64,40%** | **+0,45** | **52,38%** | **0,22564** | **52,4% → 70,62%** |
+
+Dos lecturas honestas de esa última fila. Es la primera vez que el motor queda **por encima** de la regla trivial en vez de por debajo, y la primera vez que acierta más de la mitad de las veces que la contradice —que es la fila donde se ve si aporta o destruye información—. Pero +0,45 puntos con z = 0,24 **no es significativo**: sigue siendo un empate, sólo que ya no un empate perdiendo. Y esa ventana solapa con los treinta días donde se ajustaron los coeficientes; el número limpio es el de la validación apartada, 64,66% con log‑pérdida 0,63246 frente a 63,19% y 0,63458 del ancla sola.
+
+El resultado aguanta en los tres terciles de volatilidad (63,5% / 64,2% / 65,5%) y en los cinco tramos cronológicos (63,1% a 66,5%), así que no es una semana con suerte.
+
+**De dónde sale el acierto.** Al minuto uno ya se conoce un quinto de la vela. Bajo difusión, el cierre queda por encima de la apertura con probabilidad Φ(d/σ√τ), y seguir sólo esa cantidad acierta el 63,95% frente al 52,14% de la clase mayoritaria. El mérito medible sigue siendo del ancla, del tape y de la puerta de seguridad. Los 401 agentes ya no restan —antes de anclarlos perdían casi cinco puntos— pero su aporte propio sigue sin ser detectable, y el `random_walk_guard` y el `cost_benchmark` del marco de conocimiento de Nexora los siguen dando por no probados.
 
 > Modelo experimental de uso educativo: no ejecuta operaciones ni garantiza resultados.
