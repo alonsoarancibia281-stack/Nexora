@@ -49,4 +49,23 @@ El apartado de predicciones funciona como una sala de análisis de **401 agentes
 
 La pestaña **Red neuronal** muestra en vivo el flujo completo —datos, consejos, equipos, auditoría y analista jefe— con el color indicando dirección y el grosor la fuerza de la evidencia.
 
+### Validación
+
+El motor se mide con `tool/backtest.dart`, que replica la historia real de Binance ronda a ronda: al minuto uno corre el consejo completo con los datos disponibles en ese instante, emite la llamada y recién después la puntúa contra el cierre. La población aprende tras cada ronda, así que la medición es fuera de muestra.
+
+Última corrida: **10.999 rondas** entre el 6 de julio y el 13 de agosto de 2026.
+
+| Métrica | Valor |
+| --- | --- |
+| Acierto con lectura (54% de las rondas) | **69,20%** |
+| Acierto sobre todas las rondas | 64,13% |
+| Rondas silenciadas por la puerta | 46% (habrían acertado 58,18%) |
+| Calibración | 20‑30% → subió 22,2% · 50‑60% → 57,6% · 70‑80% → 79,3% |
+
+El resultado se sostiene en los tres terciles de volatilidad (69,2% / 67,8% / 70,7% con lectura) y en los seis tramos cronológicos (67,4% a 70,6%), así que no es un artefacto de una semana concreta.
+
+**Qué produce ese acierto.** Al minuto uno ya se conoce un quinto de la vela. Bajo difusión, el cierre queda por encima de la apertura con probabilidad Φ(d/σ√τ), y seguir sólo esa cantidad acierta el 64,41% —frente al 50,84% de la clase mayoritaria—. El motor completo rinde 64,13%: estadísticamente indistinguible de esa referencia (z = −0,30).
+
+Dicho sin adornos: **el mérito medible es del ancla de difusión y de la puerta de seguridad, no de los 401 agentes.** Los consejos ya no restan —antes de anclarlos perdían casi cinco puntos contra la referencia— pero tampoco suman de forma detectable en klines. La hipótesis viva es que su aporte esté en la microestructura de libro y flujo de órdenes, que la app sí recibe en vivo y el banco de pruebas no puede reconstruir desde velas. Mientras eso no se mida, el `random_walk_guard` y el `cost_benchmark` del propio marco de conocimiento de Nexora los dan por no probados.
+
 > Modelo experimental de uso educativo: no ejecuta operaciones ni garantiza resultados.
