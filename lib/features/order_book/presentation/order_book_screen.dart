@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../shared/theme/nexora_theme.dart';
 import '../../../shared/widgets/main_navigation_scaffold.dart';
+import '../../../shared/widgets/nexora_button.dart';
 import '../../market/domain/candle.dart';
 import '../../market/widgets/candlestick_chart.dart';
 import '../data/binance_order_book_service.dart';
@@ -254,7 +256,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
 
   Widget _symbolBar() {
     final change = _latestChange();
-    final color = change >= 0 ? const Color(0xFF16B980) : Colors.redAccent;
+    final color = change >= 0 ? NexoraTheme.up : Colors.redAccent;
     return Row(
       children: [
         Expanded(
@@ -326,18 +328,21 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: NexoraButton(
+                  label: 'Pegar',
+                  icon: Icons.content_paste,
+                  level: NexoraLevel.tertiary,
+                  expand: true,
                   onPressed: _pasteFromClipboard,
-                  icon: const Icon(Icons.content_paste),
-                  label: const Text('Pegar'),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: FilledButton.icon(
+                child: NexoraButton(
+                  label: 'Analizar',
+                  icon: Icons.analytics_outlined,
+                  expand: true,
                   onPressed: _analyzePasted,
-                  icon: const Icon(Icons.analytics_outlined),
-                  label: const Text('Analizar'),
                 ),
               ),
             ],
@@ -413,7 +418,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
       OrderBookSnapshot snapshot, OrderBookPrediction prediction) {
     final isBuy = _side == _TradeSide.buy;
     final actionColor =
-        isBuy ? const Color(0xFF28C48F) : const Color(0xFFFF5A75);
+        isBuy ? NexoraTheme.up : NexoraTheme.down;
     final available = isBuy ? '7.35110019 USDT' : '0.014820 BTC';
     final max = isBuy ? '73.57722803 USDT' : '0.148200 BTC';
     return Column(
@@ -449,8 +454,9 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
               height: 58,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFF1F2F4),
-                  foregroundColor: Colors.black87,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
                   padding: EdgeInsets.zero,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -517,20 +523,12 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
         _accountRow('Prestamo', '-- USDT'),
         _accountRow('Precio de liq.', '-- USDT'),
         const SizedBox(height: 10),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: actionColor,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(56),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
+        NexoraButton(
+          label: isBuy ? 'Preparar compra' : 'Preparar venta',
+          icon: isBuy ? Icons.arrow_upward : Icons.arrow_downward,
+          tone: actionColor,
+          expand: true,
           onPressed: _showManualExecutionNotice,
-          child: Text(
-            isBuy ? 'Compra con margen' : 'Venta con margen',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
         ),
         const SizedBox(height: 8),
         _poolAction(prediction),
@@ -544,14 +542,14 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
             child: _sideButton(
               label: 'Comprar',
               side: _TradeSide.buy,
-              color: const Color(0xFF28C48F),
+              color: NexoraTheme.up,
             ),
           ),
           Expanded(
             child: _sideButton(
               label: 'Vender',
               side: _TradeSide.sell,
-              color: const Color(0xFFFF5A75),
+              color: NexoraTheme.down,
             ),
           ),
           const SizedBox(width: 8),
@@ -564,7 +562,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
               ),
               Switch(
                 value: _marginEnabled,
-                activeThumbColor: const Color(0xFFFFD400),
+                activeThumbColor: NexoraTheme.brand,
                 onChanged: (value) => setState(() => _marginEnabled = value),
               ),
             ],
@@ -588,14 +586,20 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? color : const Color(0xFFF7F7F7),
+          color: selected
+              ? color
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.white : Colors.black54,
+            color: selected
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -607,7 +611,10 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
         height: 36,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFF1F2F4) : const Color(0xFFFAFAFA),
+          color: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest
+              .withValues(alpha: selected ? .9 : .45),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
@@ -620,20 +627,29 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
         height: 40,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F2F4),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Expanded(
+            const Expanded(
               child: Text(
-                'Limit Order',
+                'Orden limite',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
-            Icon(Icons.info_outline, size: 18, color: Colors.black45),
-            SizedBox(width: 10),
-            Icon(Icons.keyboard_arrow_down, color: Colors.black45),
+            Icon(
+              Icons.info_outline,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.keyboard_arrow_down,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ],
         ),
       );
@@ -655,7 +671,7 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
             hintText: hint,
             isDense: true,
             filled: true,
-            fillColor: const Color(0xFFF3F4F6),
+            fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide.none,
@@ -717,7 +733,10 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
             Expanded(
               child: Text(
                 label,
-                style: const TextStyle(color: Colors.black54, fontSize: 13),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
               ),
             ),
             Text(
@@ -731,9 +750,9 @@ class _OrderBookScreenState extends State<OrderBookScreen> {
 
   Widget _poolAction(OrderBookPrediction prediction) {
     final color = switch (prediction.bias) {
-      OrderBookBias.bullish => const Color(0xFF16B980),
-      OrderBookBias.bearish => const Color(0xFFFF4E6A),
-      OrderBookBias.neutral => const Color(0xFFB58200),
+      OrderBookBias.bullish => NexoraTheme.up,
+      OrderBookBias.bearish => NexoraTheme.down,
+      OrderBookBias.neutral => NexoraTheme.warn,
     };
     final decision = switch (prediction.bias) {
       OrderBookBias.bullish => 'COMPRA',
@@ -949,7 +968,7 @@ class _LiveOrderBook extends StatelessWidget {
         ...asks.reversed.map(
           (level) => _BookLevelRow(
             level: level,
-            color: const Color(0xFFFF4E6A),
+            color: NexoraTheme.down,
             maxQuantity: totalAsk,
             alignRight: true,
           ),
@@ -963,15 +982,18 @@ class _LiveOrderBook extends StatelessWidget {
                     ? snapshot.midpoint.toStringAsFixed(2)
                     : snapshot.midpoint.toStringAsPrecision(7),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFFFF4E6A),
+                style: TextStyle(
+                  color: bidRatio >= .5 ? NexoraTheme.up : NexoraTheme.down,
                   fontSize: 24,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               Text(
                 'Spread ${_spread(snapshot)}',
-                style: const TextStyle(fontSize: 11, color: Colors.black45),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -979,7 +1001,7 @@ class _LiveOrderBook extends StatelessWidget {
         ...bids.map(
           (level) => _BookLevelRow(
             level: level,
-            color: const Color(0xFF16B980),
+            color: NexoraTheme.up,
             maxQuantity: totalBid,
             alignRight: false,
           ),
@@ -989,7 +1011,7 @@ class _LiveOrderBook extends StatelessWidget {
           children: [
             Text(
               '${(bidRatio * 100).toStringAsFixed(2)}%',
-              style: const TextStyle(color: Color(0xFF16B980), fontSize: 12),
+              style: const TextStyle(color: NexoraTheme.up, fontSize: 12),
             ),
             const SizedBox(width: 4),
             Expanded(
@@ -1001,11 +1023,11 @@ class _LiveOrderBook extends StatelessWidget {
                     children: [
                       Expanded(
                         flex: (bidRatio * 1000).round().clamp(1, 999),
-                        child: Container(color: const Color(0xFF16B980)),
+                        child: Container(color: NexoraTheme.up),
                       ),
                       Expanded(
                         flex: (askRatio * 1000).round().clamp(1, 999),
-                        child: Container(color: const Color(0xFFFF4E6A)),
+                        child: Container(color: NexoraTheme.down),
                       ),
                     ],
                   ),
@@ -1015,7 +1037,7 @@ class _LiveOrderBook extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               '${(askRatio * 100).toStringAsFixed(2)}%',
-              style: const TextStyle(color: Color(0xFFFF4E6A), fontSize: 12),
+              style: const TextStyle(color: NexoraTheme.down, fontSize: 12),
             ),
           ],
         ),
@@ -1024,14 +1046,18 @@ class _LiveOrderBook extends StatelessWidget {
           height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: const Row(
+          child: Row(
             children: [
-              Expanded(child: Text('0.01', style: TextStyle(fontSize: 12))),
-              Icon(Icons.keyboard_arrow_down, size: 18),
-              Icon(Icons.view_module, size: 18, color: Colors.black54),
+              const Expanded(child: Text('0.01', style: TextStyle(fontSize: 12))),
+              const Icon(Icons.keyboard_arrow_down, size: 18),
+              Icon(
+                Icons.view_module,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ],
           ),
         ),

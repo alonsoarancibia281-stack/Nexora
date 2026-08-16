@@ -1,27 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
+import 'nexora_shell.dart';
+
+/// Kept for the screens that already use it. The frame now comes from
+/// [NexoraShell], so the side bar and the bottom pills stay in one place.
 class MainNavigationScaffold extends StatelessWidget {
-  const MainNavigationScaffold({super.key, required this.child, required this.currentIndex});
+  const MainNavigationScaffold({
+    super.key,
+    required this.child,
+    required this.currentIndex,
+  });
 
   final Widget child;
   final int currentIndex;
 
-  static const _routes = ['/home', '/market', '/order-book', '/analyze', '/favorites'];
-
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: child,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: currentIndex,
-          onDestinationSelected: (index) => context.go(_routes[index]),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Inicio'),
-            NavigationDestination(icon: Icon(Icons.show_chart_outlined), selectedIcon: Icon(Icons.show_chart), label: 'Mercado'),
-            NavigationDestination(icon: Icon(Icons.swap_vert), selectedIcon: Icon(Icons.swap_vert_circle), label: 'Flujo'),
-            NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'Analizar'),
-            NavigationDestination(icon: Icon(Icons.star_outline), selectedIcon: Icon(Icons.star), label: 'Favoritos'),
-          ],
-        ),
-      );
+  Widget build(BuildContext context) =>
+      NexoraShell(currentIndex: currentIndex, child: child);
 }
