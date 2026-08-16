@@ -15,7 +15,7 @@ class SettingsScreen extends ConsumerWidget {
     final mode = ref.watch(themeModeProvider);
     final brightness = Theme.of(context).brightness;
     return NexoraShell(
-      currentIndex: 6,
+      currentIndex: 7,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(title: const Text('Ajustes')),

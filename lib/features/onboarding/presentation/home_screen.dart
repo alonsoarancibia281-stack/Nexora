@@ -34,6 +34,14 @@ class HomeScreen extends ConsumerWidget {
                 onPressed: () => context.go('/pulse'),
               ),
               const SizedBox(height: 10),
+              NexoraButton(
+                label: 'Bot de ideas',
+                icon: Icons.smart_toy_outlined,
+                level: NexoraLevel.secondary,
+                expand: true,
+                onPressed: () => context.go('/bot'),
+              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(

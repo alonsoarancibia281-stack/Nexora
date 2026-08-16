@@ -370,13 +370,13 @@ class _DecisionCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _Tag('Acuerdo ${Simple.percent(outlook.agreement)}'),
-              _Tag(
+              NexoraTag('Acuerdo ${Simple.percent(outlook.agreement)}'),
+              NexoraTag(
                 outlook.isCalm ? 'Mercado tranquilo' : 'Mercado movido',
                 tone: outlook.isCalm ? NexoraTheme.up : NexoraTheme.warn,
               ),
-              _Tag('Ronda ${Simple.signedPercent(outlook.distancePercent)}'),
-              _Tag('Precio ${Simple.price(outlook.price)}'),
+              NexoraTag('Ronda ${Simple.signedPercent(outlook.distancePercent)}'),
+              NexoraTag('Precio ${Simple.price(outlook.price)}'),
             ],
           ),
           if (outlook.secondOpinion case final note?) ...[
@@ -403,36 +403,6 @@ class _DecisionCard extends StatelessWidget {
   }
 }
 
-class _Tag extends StatelessWidget {
-  const _Tag(this.text, {this.tone});
-
-  final String text;
-  final Color? tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final color = tone ?? scheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 12.5,
-          fontWeight: FontWeight.w600,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
 
 class _ExitCard extends StatelessWidget {
   const _ExitCard({required this.advice});
@@ -486,12 +456,12 @@ class _ExitCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _Tag(
+                      NexoraTag(
                         'Ahora ${Simple.percent(advice.currentProbability)}',
                         tone: color,
                       ),
                       const SizedBox(width: 8),
-                      _Tag('Mejor ${Simple.percent(advice.peakProbability)}'),
+                      NexoraTag('Mejor ${Simple.percent(advice.peakProbability)}'),
                     ],
                   ),
                 ],

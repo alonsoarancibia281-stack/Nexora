@@ -45,6 +45,8 @@ jobs:
         run: >-
           flutter build apk --release
           --dart-define=NEXORA_AI_ENDPOINT=https://jyifsslfjyryoypwmxmq.supabase.co/functions/v1/pulse-ai
+          --dart-define=NEXORA_RESEARCH_ENDPOINT=https://jyifsslfjyryoypwmxmq.supabase.co/functions/v1/market-research
+          --dart-define=NEXORA_PUBLISH_ENDPOINT=https://jyifsslfjyryoypwmxmq.supabase.co/functions/v1/publish-signal
           --dart-define=NEXORA_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5aWZzc2xmanlyeW95cHdteG1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNTcxMTQsImV4cCI6MjEwMTczMzExNH0.QaJsLI5nyGrDQh3vc2ZghI_BKmZoogCWQVTdzEr-R50
       - name: Prepare APK
         run: |

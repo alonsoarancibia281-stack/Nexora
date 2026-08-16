@@ -14,6 +14,25 @@ Deciden seis agentes, no cien: **Tendencia, Impulso, Flujo, Liquidez, Volatilida
 - **Salida anticipada**: la vigilancia mide cuánta ventaja queda frente al mejor momento de la ronda, si el precio se fue en contra y cuánto tiempo falta, y avisa *antes* del cierre.
 - **Honestidad**: la probabilidad nunca pasa del 90% (85% en 1 hora). Ninguna ronda está garantizada.
 
+## Bot de ideas · el sistema de 5 pasos
+
+1. **Escaneo** — un escáner lee todo el mercado USDT de Binance en una llamada, tira las stablecoins, los tokens apalancados y lo que no tiene volumen, y solo los supervivientes pagan una segunda llamada de velas diarias. Se queda con lo que sube con fuerza **en la semana y en el mes**, medido contra el propio rango diario de cada moneda para que una moneda tranquila y una salvaje se juzguen igual.
+2. **Investigación con Claude** — una función de Supabase (`market-research`) llama a la API de Anthropic y te explica en una pantalla por qué se mueve, qué hace el dinero, qué vigilar y cuál es el riesgo. **No hay fuente de noticias conectada**: el modelo solo lee los números y tiene prohibido inventar eventos, listados o anuncios.
+3. **Predicción** — tres reglas (**Ruptura, Retroceso, Compresión**) con entrada, stop y objetivo propios. El mismo código que dispara la señal recorre el histórico del par barra a barra y cuenta cuántas veces funcionó: verás *acierta 9 de 14* antes de entrar. Cuando el stop y el objetivo caen en el mismo día se cuenta como pérdida — nadie sabe cuál llegó primero. El bot solo propone una jugada si la regla suena hoy **y** su histórico da ventaja.
+4. **Riesgo y ejecución** — los tres datos que importan (entrada, stop, objetivo) más el tamaño de la posición calculado desde tu capital y el porcentaje que aceptas perder. **Nexora no ejecuta órdenes ni guarda claves de tu cuenta**: copias el plan y lo colocas tú.
+5. **Aprendizaje y transparencia** — cada idea que guardas queda en el teléfono, gane o pierda, con su resultado. Puedes publicarla en una tabla pública de Supabase (`signal_history`) de solo lectura para que cualquiera revise el historial completo.
+
+### Para encender los pasos 2 y 5
+
+```bash
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # paso 02
+supabase functions deploy market-research
+supabase functions deploy publish-signal            # paso 05
+supabase db push                                    # crea signal_history
+```
+
+Sin la clave, la app funciona igual: el escaneo, las estrategias, el plan y el historial local no dependen de ella.
+
 ## Interfaz
 
 Tema claro y oscuro con ajuste propio, barra lateral responsive que se expande al pasar el ratón, barra inferior de pastillas en móvil, jerarquía de botones (`NexoraButton`) con texto siempre en una línea y un fondo de shader gradient animado detrás de toda la app.

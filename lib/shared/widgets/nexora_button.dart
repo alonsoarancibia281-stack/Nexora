@@ -113,6 +113,37 @@ class NexoraButton extends StatelessWidget {
       background.computeLuminance() > .55 ? Colors.black87 : Colors.white;
 }
 
+/// A small label for one fact. Always one line, tinted by [tone].
+class NexoraTag extends StatelessWidget {
+  const NexoraTag(this.text, {super.key, this.tone});
+
+  final String text;
+  final Color? tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = tone ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
 /// A row of options where only one is active. Labels stay on one line.
 class NexoraSegmented<T> extends StatelessWidget {
   const NexoraSegmented({

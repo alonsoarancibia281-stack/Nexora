@@ -58,6 +58,12 @@ const nexoraDestinations = <NexoraDestination>[
     selectedIcon: Icons.bolt,
   ),
   NexoraDestination(
+    label: 'Bot',
+    route: '/bot',
+    icon: Icons.smart_toy_outlined,
+    selectedIcon: Icons.smart_toy,
+  ),
+  NexoraDestination(
     label: 'Ajustes',
     route: '/settings',
     icon: Icons.tune_outlined,
