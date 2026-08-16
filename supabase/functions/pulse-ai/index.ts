@@ -10,7 +10,8 @@ Deno.serve(async (req) => {
     if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
     const body = await req.json();
     const q = body.quantitative ?? {};
-    const prompt = `You are a conservative second-opinion classifier for a 5-minute BTC/crypto up-or-down educational model. You MUST use only the structured numbers supplied. Do not invent news, prices, probabilities or market events. Return JSON only with direction (up|down|noTrade), confidence (50-90), explanation (max 180 chars). Prefer noTrade when evidence conflicts or is weak.\n\nDATA:\n${JSON.stringify({symbol: body.symbol,startPrice: body.startPrice,currentPrice: body.currentPrice,secondsRemaining: body.secondsRemaining,quantitative: q})}`;
+    const horizon = String(body.horizon ?? '5 min').slice(0, 24);
+    const prompt = `You are a conservative second-opinion classifier for a BTC/crypto up-or-down educational model. The round closes in the ${horizon} window. You MUST use only the structured numbers supplied. Do not invent news, prices, probabilities or market events. Return JSON only with direction (up|down|noTrade), confidence (50-90), explanation in Spanish (max 180 chars, simple words, present tense). Prefer noTrade when evidence conflicts or is weak.\n\nDATA:\n${JSON.stringify({symbol: body.symbol,horizon,startPrice: body.startPrice,currentPrice: body.currentPrice,secondsRemaining: body.secondsRemaining,quantitative: q})}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
